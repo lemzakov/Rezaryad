@@ -5,7 +5,7 @@ import StatsCard from '@/components/StatsCard';
 
 function BarChart({ data, maxValue }: { data: { label: string; value: number }[]; maxValue: number }) {
   if (data.length === 0) return <p className="text-center text-gray-400 py-4">Нет данных</p>;
-  const max = maxValue || Math.max(...data.map(d => d.value), 1);
+  const max = maxValue !== 0 ? maxValue : Math.max(...data.map(d => d.value), 1);
   const width = 700;
   const height = 200;
   const barWidth = Math.floor((width - 40) / data.length) - 2;

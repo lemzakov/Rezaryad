@@ -35,6 +35,14 @@ export default function SessionsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function escapeCSV(value: string | number | undefined | null): string {
+    const str = String(value ?? '');
+    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  }
+
   function exportCSV() {
     const headers = ['ID', 'Курьер', 'Локер', 'Ячейка', 'Начало', 'Конец', 'Длительность (мин)', 'Стоимость', 'Статус'];
     const rows = sessions.map(s => [
@@ -48,7 +56,7 @@ export default function SessionsPage() {
       s.cost ?? '',
       s.status,
     ]);
-    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+    const csv = [headers, ...rows].map(r => r.map(escapeCSV).join(',')).join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
