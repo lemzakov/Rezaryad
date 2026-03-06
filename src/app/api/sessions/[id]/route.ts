@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { getAuthenticatedUser } from '@/lib/server-auth';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -7,24 +7,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (error) return error;
 
   const { id } = await params;
-  const session = await prisma.session.findUnique({
-    where: { id },
-    include: { cell: { include: { locker: true } } },
-  });
-  if (!session || session.userId !== user!.id) {
+  const { data: session } = await supabase
+    .from('sessions')
+    .select('*, cells(number, lockers(name))')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (!session || session.user_id !== user.id) {
     return NextResponse.json({ detail: 'Session not found' }, { status: 404 });
   }
 
   return NextResponse.json({
     id: session.id,
-    startAt: session.startAt,
-    endAt: session.endAt,
-    durationMins: session.durationMins,
+    startAt: session.start_at,
+    endAt: session.end_at,
+    durationMins: session.duration_mins,
     cost: session.cost,
-    isPaid: session.isPaid,
+    isPaid: session.is_paid,
     cell: {
-      number: session.cell.number,
-      locker: session.cell.locker ? { name: session.cell.locker.name } : null,
+      number: session.cells?.number,
+      locker: session.cells?.lockers ? { name: session.cells.lockers.name } : null,
     },
   });
 }
+

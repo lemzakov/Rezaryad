@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { getAuthenticatedUser } from '@/lib/server-auth';
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -7,10 +7,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (error) return error;
 
   const { id } = await params;
-  const card = await prisma.paymentCard.findUnique({ where: { id } });
-  if (!card || card.userId !== user!.id) {
+  const { data: card } = await supabase
+    .from('payment_cards')
+    .select('id, user_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (!card || card.user_id !== user.id) {
     return NextResponse.json({ detail: 'Card not found' }, { status: 404 });
   }
-  await prisma.paymentCard.update({ where: { id }, data: { isActive: false } });
+  await supabase.from('payment_cards').update({ is_active: false }).eq('id', id);
   return NextResponse.json({ deleted: true });
 }
+

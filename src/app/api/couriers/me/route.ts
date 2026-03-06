@@ -6,13 +6,14 @@ export async function GET(req: NextRequest) {
   if (error) return error;
 
   return NextResponse.json({
-    id: user!.id,
-    maxId: user!.maxId,
-    phone: user!.phone,
-    language: user!.language,
-    isVerified: user!.isVerified,
-    hasDebt: user!.hasDebt,
-    debtAmount: user!.debtAmount,
-    createdAt: user!.createdAt,
+    id: user.id,
+    maxId: user.max_id,
+    phone: user.phone,
+    language: user.language,
+    isVerified: user.is_verified,
+    hasDebt: user.has_debt,
+    debtAmount: user.debt_amount,
+    createdAt: user.created_at,
   });
 }
+

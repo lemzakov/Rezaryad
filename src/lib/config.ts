@@ -1,25 +1,19 @@
-export const DATABASE_URL: string =
-  process.env.DATABASE_URL ||
-  process.env.rezaryad_POSTGRES_PRISMA_URL ||
-  process.env.POSTGRES_PRISMA_URL ||
-  process.env.rezaryad_POSTGRES_URL ||
-  process.env.POSTGRES_URL ||
+// Supabase connection (resolved from several possible env var names)
+export const SUPABASE_URL: string =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  process.env.rezaryad_SUPABASE_URL ||
   '';
 
-if (DATABASE_URL) {
-  process.env.DATABASE_URL = DATABASE_URL;
-}
-
-export const DIRECT_DATABASE_URL: string =
-  process.env.DIRECT_DATABASE_URL ||
-  process.env.rezaryad_POSTGRES_URL_NON_POOLING ||
-  process.env.POSTGRES_URL_NON_POOLING ||
-  DATABASE_URL ||
+export const SUPABASE_SERVICE_ROLE_KEY: string =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.rezaryad_SUPABASE_SERVICE_ROLE_KEY ||
   '';
 
-if (DIRECT_DATABASE_URL) {
-  process.env.DIRECT_DATABASE_URL = DIRECT_DATABASE_URL;
-}
+// Public anon key — used only if you need a public (RLS-gated) client
+export const SUPABASE_ANON_KEY: string =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.rezaryad_SUPABASE_ANON_KEY ||
+  '';
 
 export const MAX_BOT_TOKEN: string = process.env.MAX_BOT_TOKEN || '';
 

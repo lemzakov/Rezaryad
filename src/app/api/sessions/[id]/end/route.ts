@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { getAuthenticatedUser } from '@/lib/server-auth';
 import { SessionService } from '@/lib/services/session';
 
@@ -9,24 +9,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { id } = await params;
 
-  // Verify the session belongs to this user
-  const existing = await prisma.session.findUnique({ where: { id } });
-  if (!existing || existing.userId !== user!.id) {
+  const { data: existing } = await supabase
+    .from('sessions')
+    .select('user_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (!existing || existing.user_id !== user.id) {
     return NextResponse.json({ detail: 'Session not found' }, { status: 404 });
   }
 
   const { doorClosed, chargerDisconnected } = await req.json();
-  const svc = new SessionService(prisma);
+  const svc = new SessionService(supabase);
   try {
     const session = await svc.endSession(id, doorClosed, chargerDisconnected);
     return NextResponse.json({
       id: session.id,
-      endAt: session.endAt,
-      durationMins: session.durationMins,
+      endAt: session.end_at,
+      durationMins: session.duration_mins,
       cost: session.cost,
-      isPaid: session.isPaid,
+      isPaid: session.is_paid,
     });
   } catch (e) {
     return NextResponse.json({ detail: String(e) }, { status: 400 });
   }
 }
+

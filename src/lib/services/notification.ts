@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { MAX_BOT_TOKEN, MAX_API_BASE } from '../config';
 
 async function sendMessage(chatId: string, text: string, keyboard?: unknown): Promise<void> {
@@ -22,15 +22,19 @@ async function sendMessage(chatId: string, text: string, keyboard?: unknown): Pr
 }
 
 export class NotificationService {
-  constructor(private db: PrismaClient) {}
+  constructor(private db: SupabaseClient) {}
 
   private async getUserChat(userId: string): Promise<{ maxId: string | null; language: string }> {
-    const user = await this.db.user.findUnique({ where: { id: userId } });
-    return { maxId: user?.maxId ?? null, language: user?.language ?? 'RU' };
+    const { data: user } = await this.db
+      .from('users')
+      .select('max_id, language')
+      .eq('id', userId)
+      .maybeSingle();
+    return { maxId: user?.max_id ?? null, language: user?.language ?? 'RU' };
   }
 
   private async record(userId: string, type: string, message: string): Promise<void> {
-    await this.db.notification.create({ data: { userId, type, message } });
+    await this.db.from('notifications').insert({ user_id: userId, type, message });
   }
 
   async sendOpenDoorReminder(userId: string, minutes: number): Promise<void> {
@@ -62,7 +66,11 @@ export class NotificationService {
   async sendQueueTurn(userId: string, lockerId: string): Promise<void> {
     const { maxId, language } = await this.getUserChat(userId);
     if (!maxId) return;
-    const locker = await this.db.locker.findUnique({ where: { id: lockerId } });
+    const { data: locker } = await this.db
+      .from('lockers')
+      .select('name')
+      .eq('id', lockerId)
+      .maybeSingle();
     const lockerName = locker?.name ?? '?';
     const msgs: Record<string, string> = {
       RU: `🎉 Ваша очередь! Свободная ячейка в ${lockerName}. У вас 10 минут на бесплатное бронирование.`,
@@ -75,8 +83,15 @@ export class NotificationService {
   }
 
   async notifyAdminAnomaly(sessionId: string): Promise<void> {
-    const session = await this.db.session.findUnique({ where: { id: sessionId } });
+    const { data: session } = await this.db
+      .from('sessions')
+      .select('user_id, start_at')
+      .eq('id', sessionId)
+      .maybeSingle();
     if (!session) return;
-    console.warn(`⚠️ Anomaly: session ${sessionId}, user ${session.userId}, started ${session.startAt}`);
+    console.warn(
+      `⚠️ Anomaly: session ${sessionId}, user ${session.user_id}, started ${session.start_at}`,
+    );
   }
 }
+

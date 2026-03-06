@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { getAuthenticatedUser } from '@/lib/server-auth';
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -7,10 +7,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (error) return error;
 
   const { id } = await params;
-  const sub = await prisma.subscription.findUnique({ where: { id } });
-  if (!sub || sub.userId !== user!.id) {
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('user_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (!sub || sub.user_id !== user.id) {
     return NextResponse.json({ detail: 'Subscription not found' }, { status: 404 });
   }
-  await prisma.subscription.update({ where: { id }, data: { isActive: false, autoRenew: false } });
+  await supabase
+    .from('subscriptions')
+    .update({ is_active: false, auto_renew: false })
+    .eq('id', id);
   return NextResponse.json({ cancelled: true });
 }
+

@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
 
 export async function GET() {
-  const dbUrl = Boolean(
-    process.env.DATABASE_URL ||
-    process.env.rezaryad_POSTGRES_PRISMA_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.rezaryad_POSTGRES_URL,
+  const supabaseUrl = Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.rezaryad_SUPABASE_URL,
+  );
+  const supabaseKey = Boolean(
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.rezaryad_SUPABASE_SERVICE_ROLE_KEY,
   );
   const secret = Boolean(process.env.SECRET_KEY || process.env.rezaryad_SUPABASE_JWT_SECRET);
   const checks = {
-    DATABASE_URL: dbUrl,
+    NEXT_PUBLIC_SUPABASE_URL: supabaseUrl,
+    SUPABASE_SERVICE_ROLE_KEY: supabaseKey,
     SECRET_KEY: secret,
     ADMIN_PASSWORD: Boolean(process.env.ADMIN_PASSWORD),
     MAX_BOT_TOKEN: Boolean(process.env.MAX_BOT_TOKEN),
@@ -21,3 +24,4 @@ export async function GET() {
     missing,
   });
 }
+

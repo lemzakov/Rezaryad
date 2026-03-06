@@ -1,46 +1,61 @@
-import { PrismaClient } from '@prisma/client';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { ACQUIRING_API_KEY, ACQUIRING_BASE_URL } from '../config';
 
 export class PaymentService {
-  constructor(private db: PrismaClient) {}
+  constructor(private db: SupabaseClient) {}
 
-  async charge(userId: string, amount: number, sessionId?: string | null): Promise<Record<string, unknown>> {
-    const user = await this.db.user.findUnique({ where: { id: userId } });
+  async charge(
+    userId: string,
+    amount: number,
+    sessionId?: string | null,
+  ): Promise<Record<string, unknown>> {
+    const { data: user } = await this.db.from('users').select('*').eq('id', userId).maybeSingle();
     if (!user) throw new Error('User not found');
 
-    const card = await this.db.paymentCard.findFirst({ where: { userId, isActive: true } });
+    const { data: card } = await this.db
+      .from('payment_cards')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .maybeSingle();
 
-    const payment = await this.db.payment.create({
-      data: {
-        userId,
-        sessionId: sessionId || null,
+    const { data: payment, error } = await this.db
+      .from('payments')
+      .insert({
+        user_id: userId,
+        session_id: sessionId || null,
         amount,
         status: 'PENDING',
-        cardToken: card?.cardToken || null,
-      },
-    });
+        card_token: card?.card_token || null,
+      })
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
 
     if (!card) return this.handleInsufficientFunds(sessionId, amount, userId, payment.id);
 
     let success = false;
     try {
-      success = await this.callAcquiring(card.cardToken, amount, payment.id);
+      success = await this.callAcquiring(card.card_token, amount, payment.id);
     } catch {
       success = false;
     }
 
     if (success) {
-      await this.db.payment.update({ where: { id: payment.id }, data: { status: 'SUCCESS' } });
+      await this.db.from('payments').update({ status: 'SUCCESS' }).eq('id', payment.id);
       if (sessionId) {
-        await this.db.session.update({ where: { id: sessionId }, data: { isPaid: true } });
+        await this.db.from('sessions').update({ is_paid: true }).eq('id', sessionId);
       }
       return { status: 'success', payment_id: payment.id };
-    } else {
-      return this.handleInsufficientFunds(sessionId, amount, userId, payment.id);
     }
+    return this.handleInsufficientFunds(sessionId, amount, userId, payment.id);
   }
 
-  private async callAcquiring(cardToken: string, amount: number, paymentId: string): Promise<boolean> {
+  private async callAcquiring(
+    cardToken: string,
+    amount: number,
+    paymentId: string,
+  ): Promise<boolean> {
     try {
       const resp = await fetch(`${ACQUIRING_BASE_URL}/charge`, {
         method: 'POST',
@@ -60,40 +75,56 @@ export class PaymentService {
   }
 
   private async handleInsufficientFunds(
-    sessionId: string | null | undefined,
+    _sessionId: string | null | undefined,
     amount: number,
     userId: string,
     paymentId: string,
   ): Promise<Record<string, unknown>> {
-    await this.db.payment.update({ where: { id: paymentId }, data: { status: 'FAILED' } });
-    const user = await this.db.user.findUnique({ where: { id: userId } });
-    const newDebt = (user?.debtAmount ?? 0) + amount;
-    await this.db.user.update({
-      where: { id: userId },
-      data: { hasDebt: true, debtAmount: newDebt },
-    });
+    await this.db.from('payments').update({ status: 'FAILED' }).eq('id', paymentId);
+    const { data: user } = await this.db.from('users').select('debt_amount').eq('id', userId).maybeSingle();
+    const newDebt = (user?.debt_amount ?? 0) + amount;
+    await this.db
+      .from('users')
+      .update({ has_debt: true, debt_amount: newDebt })
+      .eq('id', userId);
     return { status: 'debt', debt_amount: newDebt };
   }
 
   async processDebt(userId: string): Promise<boolean> {
-    const user = await this.db.user.findUnique({ where: { id: userId } });
-    if (!user || !user.hasDebt || user.debtAmount <= 0) return true;
+    const { data: user } = await this.db.from('users').select('*').eq('id', userId).maybeSingle();
+    if (!user || !user.has_debt || user.debt_amount <= 0) return true;
 
-    const card = await this.db.paymentCard.findFirst({ where: { userId, isActive: true } });
+    const { data: card } = await this.db
+      .from('payment_cards')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .maybeSingle();
     if (!card) return false;
 
-    const payment = await this.db.payment.create({
-      data: { userId, amount: user.debtAmount, status: 'PENDING', cardToken: card.cardToken },
-    });
+    const { data: payment, error } = await this.db
+      .from('payments')
+      .insert({
+        user_id: userId,
+        amount: user.debt_amount,
+        status: 'PENDING',
+        card_token: card.card_token,
+      })
+      .select()
+      .single();
+    if (error) return false;
 
-    const success = await this.callAcquiring(card.cardToken, user.debtAmount, payment.id);
+    const success = await this.callAcquiring(card.card_token, user.debt_amount, payment.id);
     if (success) {
-      await this.db.payment.update({ where: { id: payment.id }, data: { status: 'SUCCESS' } });
-      await this.db.user.update({ where: { id: userId }, data: { hasDebt: false, debtAmount: 0 } });
+      await this.db.from('payments').update({ status: 'SUCCESS' }).eq('id', payment.id);
+      await this.db
+        .from('users')
+        .update({ has_debt: false, debt_amount: 0 })
+        .eq('id', userId);
       return true;
-    } else {
-      await this.db.payment.update({ where: { id: payment.id }, data: { status: 'FAILED' } });
-      return false;
     }
+    await this.db.from('payments').update({ status: 'FAILED' }).eq('id', payment.id);
+    return false;
   }
 }
+

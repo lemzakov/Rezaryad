@@ -1,77 +1,126 @@
-import { PrismaClient } from '@prisma/client';
-import { BOOKING_FREE_MINS, BOOKING_FREE_MINS_SUBSCRIBED, PENALTY_HOURS, MAX_ACTIVE_BOOKINGS, MAX_ACTIVE_SESSIONS } from '../config';
+import { SupabaseClient } from '@supabase/supabase-js';
+import {
+  BOOKING_FREE_MINS,
+  BOOKING_FREE_MINS_SUBSCRIBED,
+  PENALTY_HOURS,
+  MAX_ACTIVE_BOOKINGS,
+  MAX_ACTIVE_SESSIONS,
+} from '../config';
+import type { DbBooking } from '../types';
 
 export class BookingService {
-  constructor(private db: PrismaClient) {}
+  constructor(private db: SupabaseClient) {}
 
-  async createBooking(userId: string, cellId: string) {
-    const user = await this.db.user.findUnique({ where: { id: userId } });
+  async createBooking(userId: string, cellId: string): Promise<DbBooking> {
+    const { data: user } = await this.db
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
     if (!user) throw new Error('User not found');
-    if (user.hasDebt) throw new Error(`User has debt: ${user.debtAmount}`);
+    if (user.has_debt) throw new Error(`User has debt: ${user.debt_amount}`);
 
-    const activeBookings = await this.db.booking.count({ where: { userId, status: 'ACTIVE' } });
-    if (activeBookings >= MAX_ACTIVE_BOOKINGS) throw new Error('Max active bookings reached');
+    const { count: activeBookings } = await this.db
+      .from('bookings')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('status', 'ACTIVE');
+    if ((activeBookings ?? 0) >= MAX_ACTIVE_BOOKINGS) throw new Error('Max active bookings reached');
 
-    const activeSessions = await this.db.session.count({ where: { userId, endAt: null } });
-    if (activeSessions >= MAX_ACTIVE_SESSIONS) throw new Error('Max active sessions reached');
+    const { count: activeSessions } = await this.db
+      .from('sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .is('end_at', null);
+    if ((activeSessions ?? 0) >= MAX_ACTIVE_SESSIONS) throw new Error('Max active sessions reached');
 
-    const cell = await this.db.cell.findUnique({ where: { id: cellId } });
+    const { data: cell } = await this.db
+      .from('cells')
+      .select('*')
+      .eq('id', cellId)
+      .maybeSingle();
     if (!cell || cell.status !== 'FREE') throw new Error('Cell is not available');
 
     const now = new Date();
-    const penaltyBooking = await this.db.booking.findFirst({
-      where: {
-        userId,
-        penaltyUntil: { gt: now },
-        status: { in: ['CANCELLED', 'EXPIRED'] },
-      },
-    });
+    const { data: penaltyBooking } = await this.db
+      .from('bookings')
+      .select('id')
+      .eq('user_id', userId)
+      .in('status', ['CANCELLED', 'EXPIRED'])
+      .gt('penalty_until', now.toISOString())
+      .maybeSingle();
     const isFree = penaltyBooking === null;
 
-    const sub = await this.db.subscription.findFirst({
-      where: { userId, isActive: true, endAt: { gt: now } },
-    });
+    const { data: sub } = await this.db
+      .from('subscriptions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .gt('end_at', now.toISOString())
+      .maybeSingle();
     const freeMins = sub ? BOOKING_FREE_MINS_SUBSCRIBED : BOOKING_FREE_MINS;
     const endsAt = new Date(now.getTime() + freeMins * 60 * 1000);
 
-    const booking = await this.db.booking.create({
-      data: { userId, cellId, status: 'ACTIVE', isFree, endsAt },
-    });
-    await this.db.cell.update({ where: { id: cellId }, data: { status: 'BUSY' } });
+    const { data: booking, error } = await this.db
+      .from('bookings')
+      .insert({
+        user_id: userId,
+        cell_id: cellId,
+        status: 'ACTIVE',
+        is_free: isFree,
+        ends_at: endsAt.toISOString(),
+      })
+      .select()
+      .single<DbBooking>();
+    if (error) throw new Error(error.message);
+
+    await this.db.from('cells').update({ status: 'BUSY' }).eq('id', cellId);
     return booking;
   }
 
-  async cancelBooking(bookingId: string, userId: string) {
-    const booking = await this.db.booking.findUnique({ where: { id: bookingId } });
-    if (!booking || booking.userId !== userId) throw new Error('Booking not found');
+  async cancelBooking(bookingId: string, userId: string): Promise<Date> {
+    const { data: booking } = await this.db
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .maybeSingle<DbBooking>();
+    if (!booking || booking.user_id !== userId) throw new Error('Booking not found');
     if (booking.status !== 'ACTIVE') throw new Error('Booking is not active');
 
     const now = new Date();
     const penaltyUntil = new Date(now.getTime() + PENALTY_HOURS * 60 * 60 * 1000);
 
-    await this.db.booking.update({
-      where: { id: bookingId },
-      data: { status: 'CANCELLED', penaltyUntil },
-    });
-    await this.db.cell.update({ where: { id: booking.cellId }, data: { status: 'FREE' } });
+    await this.db
+      .from('bookings')
+      .update({ status: 'CANCELLED', penalty_until: penaltyUntil.toISOString() })
+      .eq('id', bookingId);
+    await this.db.from('cells').update({ status: 'FREE' }).eq('id', booking.cell_id);
     return penaltyUntil;
   }
 
-  async expireBooking(bookingId: string) {
-    const booking = await this.db.booking.findUnique({ where: { id: bookingId } });
+  async expireBooking(bookingId: string): Promise<DbBooking | null> {
+    const { data: booking } = await this.db
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .maybeSingle<DbBooking>();
     if (!booking || booking.status !== 'ACTIVE') return null;
 
     const now = new Date();
-    if (booking.endsAt > now) return null;
+    if (new Date(booking.ends_at) > now) return null;
 
-    await this.db.booking.update({ where: { id: bookingId }, data: { status: 'EXPIRED' } });
+    await this.db.from('bookings').update({ status: 'EXPIRED' }).eq('id', bookingId);
 
-    const activeSession = await this.db.session.findFirst({
-      where: { bookingId, endAt: null },
-    });
+    const { data: activeSession } = await this.db
+      .from('sessions')
+      .select('id')
+      .eq('booking_id', bookingId)
+      .is('end_at', null)
+      .maybeSingle();
     if (!activeSession) {
-      await this.db.cell.update({ where: { id: booking.cellId }, data: { status: 'FREE' } });
+      await this.db.from('cells').update({ status: 'FREE' }).eq('id', booking.cell_id);
     }
     return booking;
   }
 }
+

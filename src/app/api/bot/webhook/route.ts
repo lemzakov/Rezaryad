@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { BookingService } from '@/lib/services/booking';
 import { SessionService } from '@/lib/services/session';
 import { QueueService } from '@/lib/services/queue';
 import { PaymentService } from '@/lib/services/payment';
 import { MAX_BOT_TOKEN, MAX_API_BASE, BOOKING_FREE_MINS, BOOKING_FREE_MINS_SUBSCRIBED } from '@/lib/config';
+import type { DbUser } from '@/lib/types';
 
 async function sendMessage(chatId: string, text: string, keyboard?: unknown): Promise<void> {
   const payload: Record<string, unknown> = {
@@ -83,10 +84,21 @@ function debtKb(lang: string) { const label = lang === 'UZ' ? "💳 Qarzni to'la
 function confirmBookingKb(lang: string, cellId: string) { const [yes, no] = lang === 'UZ' ? ['✅ Tasdiqlash', '❌ Bekor qilish'] : lang === 'TJ' ? ['✅ Тасдиқ кардан', '❌ Бекор кардан'] : ['✅ Подтвердить', '❌ Отмена']; return inlineKeyboard([[btn(yes, `book:confirm:${cellId}`), btn(no, 'book:cancel')]]); }
 function lockerKb(lang: string, lockerId: string, hasFreeCells: boolean) { if (hasFreeCells) { const label = lang === 'UZ' ? '📋 Bron qilish' : lang === 'TJ' ? '📋 Бронировон кардан' : '📋 Забронировать'; return inlineKeyboard([[btn(label, `book:locker:${lockerId}`)]]); } else { const label = lang === 'UZ' ? '⏳ Navbatga turish' : lang === 'TJ' ? '⏳ Ба навбат гузоштан' : '⏳ Встать в очередь'; return inlineKeyboard([[btn(label, `queue:join:${lockerId}`)]]); } }
 
-async function getOrCreateUser(maxId: string) {
-  let user = await prisma.user.findUnique({ where: { maxId } });
-  if (!user) user = await prisma.user.create({ data: { maxId, language: 'RU' } });
-  return user;
+async function getOrCreateUser(maxId: string): Promise<DbUser> {
+  const { data: existing } = await supabase
+    .from('users')
+    .select('*')
+    .eq('max_id', maxId)
+    .maybeSingle<DbUser>();
+  if (existing) return existing;
+
+  const { data: created } = await supabase
+    .from('users')
+    .insert({ max_id: maxId, language: 'RU' })
+    .select()
+    .single<DbUser>();
+  if (!created) throw new Error('Failed to create user');
+  return created;
 }
 
 async function handleMessage(update: Record<string, unknown>) {
@@ -110,12 +122,20 @@ async function handleMessage(update: Record<string, unknown>) {
     return;
   }
   if (text.length > 6 && !text.startsWith('/')) {
-    const locker = await prisma.locker.findUnique({ where: { qrCode: text }, include: { cells: true } });
+    const { data: locker } = await supabase
+      .from('lockers')
+      .select('*, cells(*)')
+      .eq('qr_code', text)
+      .maybeSingle();
     if (locker) {
-      const freeCells = locker.cells.filter((c) => c.status === 'FREE');
-      const tariffs = await prisma.tariff.findMany({ where: { isSubscription: false } });
+      const cells: { status: string }[] = locker.cells ?? [];
+      const freeCells = cells.filter((c) => c.status === 'FREE');
+      const { data: tariffs } = await supabase
+        .from('tariffs')
+        .select('*')
+        .eq('is_subscription', false);
       const currency = (({ RU: 'руб/мин', UZ: "so'm/daq", TJ: 'сомонӣ/дақ' }) as Record<string, string>)[lang] || 'руб/мин';
-      const tariffLines = tariffs.map((t) => `  • ${t.name}: ${t.pricePerMinute} ${currency}`).join('\n');
+      const tariffLines = (tariffs ?? []).map((t) => `  • ${t.name}: ${t.price_per_minute} ${currency}`).join('\n');
       if (freeCells.length === 0) {
         await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, locker.id));
       } else {
@@ -135,7 +155,7 @@ async function handleCallback(update: Record<string, unknown>) {
   const sender = (cb.user || {}) as Record<string, unknown>;
   const maxId = String(sender.user_id || '');
   const chatId = String(
-    ((cb.message as Record<string, unknown>)?.recipient as Record<string, unknown>)?.chat_id || maxId
+    ((cb.message as Record<string, unknown>)?.recipient as Record<string, unknown>)?.chat_id || maxId,
   );
 
   if (!maxId) return;
@@ -147,7 +167,7 @@ async function handleCallback(update: Record<string, unknown>) {
     if (parts[0] === 'lang') {
       const newLang = parts[1];
       if (['RU', 'UZ', 'TJ'].includes(newLang)) {
-        await prisma.user.update({ where: { id: user.id }, data: { language: newLang as 'RU' | 'UZ' | 'TJ' } });
+        await supabase.from('users').update({ language: newLang }).eq('id', user.id);
         await answerCallback(callbackId, getMsg('main_menu', newLang));
         await sendMessage(chatId, getMsg('main_menu', newLang), mainMenuKb(newLang));
       }
@@ -156,91 +176,135 @@ async function handleCallback(update: Record<string, unknown>) {
       if (action === 'main') await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang));
       else if (action === 'scan_qr') await sendMessage(chatId, getMsg('scan_qr', lang));
       else if (action === 'map') {
-        const lockers = await prisma.locker.findMany({ where: { isActive: true } });
-        const lines = lockers.map((l) => `📍 ${l.name} — ${l.address}`).join('\n');
+        const { data: lockers } = await supabase.from('lockers').select('name, address').eq('is_active', true);
+        const lines = (lockers ?? []).map((l) => `📍 ${l.name} — ${l.address}`).join('\n');
         await sendMessage(chatId, lines ? `🗺 Шкафчики:\n${lines}` : 'Нет активных шкафчиков');
       } else if (action === 'cabinet') {
-        const totalSessions = await prisma.session.count({ where: { userId: user.id } });
-        const activeSessions = await prisma.session.count({ where: { userId: user.id, endAt: null } });
-        const cabinetText = `👤 Личный кабинет\n\n📊 Статистика:\n💳 Долг: ${user.debtAmount.toFixed(2)}\n✅ Сессий всего: ${totalSessions}\n🔋 Активных аренд: ${activeSessions}`;
+        const [{ count: totalSessions }, { count: activeSessions }] = await Promise.all([
+          supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+          supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('user_id', user.id).is('end_at', null),
+        ]);
+        const cabinetText = `👤 Личный кабинет\n\n📊 Статистика:\n💳 Долг: ${Number(user.debt_amount).toFixed(2)}\n✅ Сессий всего: ${totalSessions ?? 0}\n🔋 Активных аренд: ${activeSessions ?? 0}`;
         await sendMessage(chatId, cabinetText, cabinetKb(lang));
       }
     } else if (parts[0] === 'cabinet') {
       const action = parts[1];
       if (action === 'sessions') {
-        const sessions = await prisma.session.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: 10 });
-        if (sessions.length) {
+        const { data: sessions } = await supabase
+          .from('sessions')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        if (sessions && sessions.length > 0) {
           const lines = sessions.map((s) => {
-            const dur = s.durationMins != null ? s.durationMins.toFixed(1) : '—';
-            const cost = s.cost != null ? s.cost.toFixed(2) : '0.00';
-            return `📅 ${s.startAt.toLocaleDateString()} | ⏱${dur}мин | 💰${cost}`;
+            const dur = s.duration_mins != null ? Number(s.duration_mins).toFixed(1) : '—';
+            const cost = s.cost != null ? Number(s.cost).toFixed(2) : '0.00';
+            return `📅 ${new Date(s.start_at).toLocaleDateString()} | ⏱${dur}мин | 💰${cost}`;
           });
           await sendMessage(chatId, '📋 Ваши сессии:\n' + lines.join('\n'));
         } else await sendMessage(chatId, 'Нет сессий');
       } else if (action === 'cards') {
-        const cards = await prisma.paymentCard.findMany({ where: { userId: user.id, isActive: true } });
-        if (cards.length) await sendMessage(chatId, 'Ваши карты:\n' + cards.map((c) => `💳 **** ${c.lastFour}`).join('\n'));
+        const { data: cards } = await supabase
+          .from('payment_cards')
+          .select('last_four')
+          .eq('user_id', user.id)
+          .eq('is_active', true);
+        if (cards && cards.length > 0)
+          await sendMessage(chatId, 'Ваши карты:\n' + cards.map((c) => `💳 **** ${c.last_four}`).join('\n'));
         else await sendMessage(chatId, 'Карты не привязаны');
       } else if (action === 'subscription') {
-        const sub = await prisma.subscription.findFirst({ where: { userId: user.id, isActive: true } });
-        if (sub) await sendMessage(chatId, `✅ Подписка активна до ${sub.endAt.toLocaleDateString()}`);
+        const { data: sub } = await supabase
+          .from('subscriptions')
+          .select('end_at')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (sub) await sendMessage(chatId, `✅ Подписка активна до ${new Date(sub.end_at).toLocaleDateString()}`);
         else await sendMessage(chatId, '❌ Нет активной подписки');
       }
     } else if (parts[0] === 'book' && parts[1] === 'locker') {
       const lockerId = parts[2];
-      if (user.hasDebt) { await sendMessage(chatId, getMsg('has_debt', lang, { amount: user.debtAmount.toFixed(2) }), debtKb(lang)); return; }
-      if (!user.isVerified) { await sendMessage(chatId, getMsg('not_verified', lang)); return; }
-      const activeBookings = await prisma.booking.count({ where: { userId: user.id, status: 'ACTIVE' } });
-      if (activeBookings >= 1) { await sendMessage(chatId, getMsg('max_bookings', lang)); return; }
-      const activeSessions = await prisma.session.count({ where: { userId: user.id, endAt: null } });
-      if (activeSessions >= 2) { await sendMessage(chatId, getMsg('max_sessions', lang)); return; }
-      const cell = await prisma.cell.findFirst({ where: { lockerId, status: 'FREE' } });
+      if (user.has_debt) {
+        await sendMessage(chatId, getMsg('has_debt', lang, { amount: Number(user.debt_amount).toFixed(2) }), debtKb(lang));
+        return;
+      }
+      if (!user.is_verified) { await sendMessage(chatId, getMsg('not_verified', lang)); return; }
+      const [{ count: activeBookings }, { count: activeSessions }] = await Promise.all([
+        supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'ACTIVE'),
+        supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('user_id', user.id).is('end_at', null),
+      ]);
+      if ((activeBookings ?? 0) >= 1) { await sendMessage(chatId, getMsg('max_bookings', lang)); return; }
+      if ((activeSessions ?? 0) >= 2) { await sendMessage(chatId, getMsg('max_sessions', lang)); return; }
+      const [{ data: cell }, { data: locker }, { data: sub }] = await Promise.all([
+        supabase.from('cells').select('id, number').eq('locker_id', lockerId).eq('status', 'FREE').maybeSingle(),
+        supabase.from('lockers').select('name').eq('id', lockerId).maybeSingle(),
+        supabase.from('subscriptions').select('id').eq('user_id', user.id).eq('is_active', true).maybeSingle(),
+      ]);
       if (!cell) { await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId)); return; }
-      const locker = await prisma.locker.findUnique({ where: { id: lockerId } });
-      const sub = await prisma.subscription.findFirst({ where: { userId: user.id, isActive: true } });
       const freeMins = sub ? BOOKING_FREE_MINS_SUBSCRIBED : BOOKING_FREE_MINS;
       await sendMessage(chatId, `📋 Подтвердить бронирование?\n🔋 Ячейка #${cell.number} в ${locker?.name || '—'}\n⏱ Бесплатно: ${freeMins} мин`, confirmBookingKb(lang, cell.id));
     } else if (parts[0] === 'book' && parts[1] === 'confirm') {
       const cellId = parts[2];
-      const svc = new BookingService(prisma);
+      const svc = new BookingService(supabase);
       try {
         const booking = await svc.createBooking(user.id, cellId);
-        const cell = await prisma.cell.findUnique({ where: { id: cellId }, include: { locker: true } });
+        const { data: cell } = await supabase
+          .from('cells')
+          .select('number, lockers(name)')
+          .eq('id', cellId)
+          .maybeSingle();
         await answerCallback(callbackId, '✅');
-        await sendMessage(chatId, `✅ Бронирование создано!\n⏰ Действует до: ${booking.endsAt.toLocaleTimeString()}\nЯчейка #${cell?.number || '?'}`, sessionKb(lang, 'pending'));
+        await sendMessage(
+          chatId,
+          `✅ Бронирование создано!\n⏰ Действует до: ${new Date(booking.ends_at).toLocaleTimeString()}\nЯчейка #${cell?.number || '?'}`,
+          sessionKb(lang, 'pending'),
+        );
       } catch (e) { await sendMessage(chatId, String(e)); }
     } else if (parts[0] === 'book' && parts[1] === 'cancel') {
       await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang));
     } else if (parts[0] === 'session' && parts[1] === 'end') {
       const sessionId = parts[2];
       if (sessionId === 'pending') {
-        const booking = await prisma.booking.findFirst({ where: { userId: user.id, status: 'ACTIVE' } });
+        const { data: booking } = await supabase
+          .from('bookings')
+          .select('cell_id, id')
+          .eq('user_id', user.id)
+          .eq('status', 'ACTIVE')
+          .maybeSingle();
         if (booking) {
-          const svc = new SessionService(prisma);
-          const session = await svc.startSession(user.id, booking.cellId, booking.id);
-          await answerCallback(callbackId, `🔓 Сессия началась в ${session.startAt.toLocaleTimeString()}`);
-          await sendMessage(chatId, `🔓 Ячейка открыта! Сессия началась.\n⏱ Начало: ${session.startAt.toLocaleTimeString()}`, sessionKb(lang, session.id));
+          const svc = new SessionService(supabase);
+          const session = await svc.startSession(user.id, booking.cell_id, booking.id);
+          await answerCallback(callbackId, `🔓 Сессия началась в ${new Date(session.start_at).toLocaleTimeString()}`);
+          await sendMessage(
+            chatId,
+            `🔓 Ячейка открыта! Сессия началась.\n⏱ Начало: ${new Date(session.start_at).toLocaleTimeString()}`,
+            sessionKb(lang, session.id),
+          );
         }
         return;
       }
-      const svc = new SessionService(prisma);
+      const svc = new SessionService(supabase);
       try {
         const ended = await svc.endSession(sessionId, true, true);
         await answerCallback(callbackId, '✅');
-        await sendMessage(chatId, `✅ Сессия завершена!\n⏱ Длительность: ${ended.durationMins?.toFixed(1) || '0'} мин\n💰 Стоимость: ${ended.cost?.toFixed(2) || '0.00'} руб`);
+        await sendMessage(
+          chatId,
+          `✅ Сессия завершена!\n⏱ Длительность: ${Number(ended.duration_mins ?? 0).toFixed(1)} мин\n💰 Стоимость: ${Number(ended.cost ?? 0).toFixed(2)} руб`,
+        );
       } catch (e) { await sendMessage(chatId, String(e)); }
     } else if (parts[0] === 'queue') {
       const action = parts[1];
       const lockerId = parts[2];
       if (action === 'join') await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId));
       else if (action === 'confirm') {
-        const svc = new QueueService(prisma);
+        const svc = new QueueService(supabase);
         const entry = await svc.joinQueue(user.id, lockerId);
         await answerCallback(callbackId, '✅');
         await sendMessage(chatId, getMsg('queue_joined', lang, { position: entry.position }));
       }
     } else if (parts[0] === 'debt' && parts[1] === 'pay') {
-      const svc = new PaymentService(prisma);
+      const svc = new PaymentService(supabase);
       const result = await svc.processDebt(user.id);
       await sendMessage(chatId, result ? getMsg('debt_cleared', lang) : getMsg('error_generic', lang));
     }
@@ -261,3 +325,4 @@ export async function POST(req: NextRequest) {
   }
   return NextResponse.json({ ok: true });
 }
+

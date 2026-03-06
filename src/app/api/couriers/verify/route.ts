@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { getAuthenticatedUser } from '@/lib/server-auth';
 import { GOSUSLUGI_CLIENT_ID, GOSUSLUGI_CLIENT_SECRET } from '@/lib/config';
 
@@ -23,10 +23,10 @@ export async function POST(req: NextRequest) {
 
     if (resp.ok) {
       const data = await resp.json();
-      await prisma.user.update({
-        where: { id: user!.id },
-        data: { isVerified: true, verificationData: data },
-      });
+      await supabase
+        .from('users')
+        .update({ is_verified: true, verification_data: data })
+        .eq('id', user.id);
       return NextResponse.json({ verified: true });
     }
     return NextResponse.json({ detail: 'Verification failed' }, { status: 400 });
@@ -34,3 +34,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: 'Verification service unavailable' }, { status: 503 });
   }
 }
+

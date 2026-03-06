@@ -1,18 +1,19 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 
 export async function GET() {
-  const tariffs = await prisma.tariff.findMany();
+  const { data: tariffs } = await supabase.from('tariffs').select('*');
   return NextResponse.json(
-    tariffs.map((t) => ({
+    (tariffs ?? []).map((t) => ({
       id: t.id,
       name: t.name,
-      pricePerMinute: t.pricePerMinute,
-      isSubscription: t.isSubscription,
-      subscriptionPeriod: t.subscriptionPeriod,
-      freeMins: t.freeMins,
-      discountPct: t.discountPct,
-      isNight: t.isNight,
+      pricePerMinute: t.price_per_minute,
+      isSubscription: t.is_subscription,
+      subscriptionPeriod: t.subscription_period,
+      freeMins: t.free_mins,
+      discountPct: t.discount_pct,
+      isNight: t.is_night,
     })),
   );
 }
+

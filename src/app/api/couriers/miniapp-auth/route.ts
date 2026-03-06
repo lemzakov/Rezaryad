@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHmac } from 'crypto';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { createAccessToken } from '@/lib/jwt';
 import { MAX_BOT_TOKEN } from '@/lib/config';
 
@@ -16,7 +16,6 @@ function verifyMaxInitData(initData: string, botToken: string): Record<string, s
   const computedHash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
   if (computedHash !== receivedHash) throw new Error('Invalid signature');
-
   return Object.fromEntries(sortedEntries);
 }
 
@@ -34,8 +33,22 @@ export async function POST(req: NextRequest) {
     const maxId = String(userData.id || '');
     if (!maxId) return NextResponse.json({ detail: 'Missing user id' }, { status: 400 });
 
-    let user = await prisma.user.findUnique({ where: { maxId } });
-    if (!user) user = await prisma.user.create({ data: { maxId, language: 'RU' } });
+    let { data: user } = await supabase
+      .from('users')
+      .select('id')
+      .eq('max_id', maxId)
+      .maybeSingle();
+
+    if (!user) {
+      const { data: newUser } = await supabase
+        .from('users')
+        .insert({ max_id: maxId, language: 'RU' })
+        .select('id')
+        .single();
+      user = newUser;
+    }
+
+    if (!user) return NextResponse.json({ detail: 'Failed to create user' }, { status: 500 });
 
     const token = await createAccessToken({ sub: user.id });
     return NextResponse.json({ access_token: token, token_type: 'bearer' });
@@ -43,3 +56,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: String(e) }, { status: 401 });
   }
 }
+

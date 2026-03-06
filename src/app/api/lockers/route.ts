@@ -1,20 +1,25 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 
 export async function GET() {
-  const lockers = await prisma.locker.findMany({
-    where: { isActive: true },
-    include: { cells: true },
-  });
+  const { data: lockers } = await supabase
+    .from('lockers')
+    .select('*, cells(*)')
+    .eq('is_active', true);
+
   return NextResponse.json(
-    lockers.map((l) => ({
-      id: l.id,
-      name: l.name,
-      address: l.address,
-      lat: l.lat,
-      lon: l.lon,
-      freeCells: l.cells.filter((c) => c.status === 'FREE').length,
-      totalCells: l.cells.length,
-    })),
+    (lockers ?? []).map((l) => {
+      const cells: { status: string }[] = l.cells ?? [];
+      return {
+        id: l.id,
+        name: l.name,
+        address: l.address,
+        lat: l.lat,
+        lon: l.lon,
+        freeCells: cells.filter((c) => c.status === 'FREE').length,
+        totalCells: cells.length,
+      };
+    }),
   );
 }
+

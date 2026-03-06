@@ -1,22 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { getAuthenticatedAdmin } from '@/lib/server-auth';
 
 export async function GET(req: NextRequest) {
   const { error } = await getAuthenticatedAdmin(req);
   if (error) return error;
 
-  const lockers = await prisma.locker.findMany({ include: { cells: true } });
+  const { data: lockers } = await supabase.from('lockers').select('*, cells(*)');
   return NextResponse.json(
-    lockers.map((l) => ({
+    (lockers ?? []).map((l) => ({
       id: l.id,
       name: l.name,
       address: l.address,
       lat: l.lat,
       lon: l.lon,
-      qrCode: l.qrCode,
-      isActive: l.isActive,
-      cellCount: l.cells.length,
+      qrCode: l.qr_code,
+      isActive: l.is_active,
+      cellCount: (l.cells ?? []).length,
     })),
   );
 }
@@ -31,8 +31,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: 'Missing required fields' }, { status: 400 });
   }
 
-  const locker = await prisma.locker.create({
-    data: { name, address, lat, lon, qrCode, isActive: true },
-  });
-  return NextResponse.json({ id: locker.id, name: locker.name, qrCode: locker.qrCode }, { status: 201 });
+  const { data: locker, error: insertError } = await supabase
+    .from('lockers')
+    .insert({ name, address, lat, lon, qr_code: qrCode, is_active: true })
+    .select()
+    .single();
+  if (insertError) return NextResponse.json({ detail: insertError.message }, { status: 500 });
+
+  return NextResponse.json(
+    { id: locker.id, name: locker.name, qrCode: locker.qr_code },
+    { status: 201 },
+  );
 }
+

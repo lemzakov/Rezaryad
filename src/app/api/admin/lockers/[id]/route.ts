@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { getAuthenticatedAdmin } from '@/lib/server-auth';
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -7,15 +7,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (error) return error;
 
   const { id } = await params;
-  const locker = await prisma.locker.findUnique({ where: { id } });
-  if (!locker) return NextResponse.json({ detail: 'Locker not found' }, { status: 404 });
+  const { data: existing } = await supabase
+    .from('lockers')
+    .select('id')
+    .eq('id', id)
+    .maybeSingle();
+  if (!existing) return NextResponse.json({ detail: 'Locker not found' }, { status: 404 });
 
   const body = await req.json();
-  const data: Record<string, unknown> = {};
-  if (body.name !== undefined) data.name = body.name;
-  if (body.address !== undefined) data.address = body.address;
-  if (body.isActive !== undefined) data.isActive = body.isActive;
+  const updates: { name?: string; address?: string; is_active?: boolean } = {};
+  if (body.name !== undefined) updates.name = body.name;
+  if (body.address !== undefined) updates.address = body.address;
+  if (body.isActive !== undefined) updates.is_active = body.isActive;
 
-  const updated = await prisma.locker.update({ where: { id }, data });
-  return NextResponse.json({ id: updated.id, name: updated.name, isActive: updated.isActive });
+  const { data: updated, error: updateError } = await supabase
+    .from('lockers')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (updateError) return NextResponse.json({ detail: updateError.message }, { status: 500 });
+
+  return NextResponse.json({
+    id: updated.id,
+    name: updated.name,
+    isActive: updated.is_active,
+  });
 }
+

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, extractBearer } from './jwt';
-import { prisma } from './db';
+import { supabase } from './db';
+import type { DbUser, DbAdminUser } from './types';
 
-export async function getAuthenticatedUser(req: NextRequest) {
+export async function getAuthenticatedUser(
+  req: NextRequest,
+): Promise<{ user: DbUser; error: null } | { user: null; error: NextResponse }> {
   const token = extractBearer(req.headers.get('authorization'));
   if (!token) {
     return { user: null, error: NextResponse.json({ detail: 'Not authenticated' }, { status: 401 }) };
@@ -13,7 +16,11 @@ export async function getAuthenticatedUser(req: NextRequest) {
     if (!userId) {
       return { user: null, error: NextResponse.json({ detail: 'Invalid token' }, { status: 401 }) };
     }
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle<DbUser>();
     if (!user) {
       return { user: null, error: NextResponse.json({ detail: 'User not found' }, { status: 401 }) };
     }
@@ -23,7 +30,9 @@ export async function getAuthenticatedUser(req: NextRequest) {
   }
 }
 
-export async function getAuthenticatedAdmin(req: NextRequest) {
+export async function getAuthenticatedAdmin(
+  req: NextRequest,
+): Promise<{ admin: DbAdminUser; error: null } | { admin: null; error: NextResponse }> {
   const token = extractBearer(req.headers.get('authorization'));
   if (!token) {
     return { admin: null, error: NextResponse.json({ detail: 'Not authenticated' }, { status: 401 }) };
@@ -35,7 +44,11 @@ export async function getAuthenticatedAdmin(req: NextRequest) {
     if (!adminId || role !== 'admin') {
       return { admin: null, error: NextResponse.json({ detail: 'Admin access required' }, { status: 403 }) };
     }
-    const admin = await prisma.adminUser.findUnique({ where: { id: adminId } });
+    const { data: admin } = await supabase
+      .from('admin_users')
+      .select('*')
+      .eq('id', adminId)
+      .maybeSingle<DbAdminUser>();
     if (!admin) {
       return { admin: null, error: NextResponse.json({ detail: 'Admin not found' }, { status: 401 }) };
     }
@@ -59,3 +72,4 @@ export function verifyCronAuth(req: NextRequest): NextResponse | null {
   }
   return null;
 }
+

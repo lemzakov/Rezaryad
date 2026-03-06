@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { getAuthenticatedAdmin } from '@/lib/server-auth';
 
 export async function GET(req: NextRequest) {
@@ -13,33 +13,30 @@ export async function GET(req: NextRequest) {
   const activeOnly = searchParams.get('active_only') === 'true';
   const skip = (page - 1) * limit;
 
-  const where: Record<string, unknown> = {};
-  if (userId) where.userId = userId;
-  if (activeOnly) where.endAt = null;
+  let q = supabase
+    .from('sessions')
+    .select('*, users(max_id), cells(id, locker_id, lockers(name))', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(skip, skip + limit - 1);
 
-  const [sessions, total] = await Promise.all([
-    prisma.session.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      include: { user: true, cell: { include: { locker: true } } },
-    }),
-    prisma.session.count({ where }),
-  ]);
+  if (userId) q = q.eq('user_id', userId);
+  if (activeOnly) q = q.is('end_at', null);
+
+  const { data: sessions, count: total } = await q;
 
   return NextResponse.json({
-    items: sessions.map((s) => ({
+    items: (sessions ?? []).map((s) => ({
       id: s.id,
-      userId: s.userId,
-      userMaxId: s.user?.maxId ?? null,
-      locker: s.cell?.locker?.name ?? null,
-      startAt: s.startAt,
-      endAt: s.endAt,
-      durationMins: s.durationMins,
+      userId: s.user_id,
+      userMaxId: s.users?.max_id ?? null,
+      locker: s.cells?.lockers?.name ?? null,
+      startAt: s.start_at,
+      endAt: s.end_at,
+      durationMins: s.duration_mins,
       cost: s.cost,
-      isPaid: s.isPaid,
+      isPaid: s.is_paid,
     })),
-    total,
+    total: total ?? 0,
   });
 }
+

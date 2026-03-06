@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { prisma } from '@/lib/db';
+import { supabase } from '@/lib/db';
 import { createAdminToken } from '@/lib/jwt';
+import type { DbAdminUser } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,8 +10,12 @@ export async function POST(req: NextRequest) {
     if (!login || !password) {
       return NextResponse.json({ detail: 'Missing credentials' }, { status: 400 });
     }
-    const admin = await prisma.adminUser.findUnique({ where: { login } });
-    if (!admin || !bcrypt.compareSync(password, admin.passwordHash)) {
+    const { data: admin } = await supabase
+      .from('admin_users')
+      .select('*')
+      .eq('login', login)
+      .maybeSingle<DbAdminUser>();
+    if (!admin || !bcrypt.compareSync(password, admin.password_hash)) {
       return NextResponse.json({ detail: 'Invalid credentials' }, { status: 401 });
     }
     const token = await createAdminToken(admin.id);
@@ -19,3 +24,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: 'Internal server error' }, { status: 500 });
   }
 }
+
