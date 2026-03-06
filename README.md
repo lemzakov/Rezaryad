@@ -17,7 +17,6 @@ Rezaryad/
 │   │   └── main.py   # FastAPI app + scheduler
 │   ├── prisma/
 │   │   └── schema.prisma
-│   ├── create_admin.py  # One-shot script to seed an admin user
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/         # Next.js 14 admin panel (Vercel-ready)
@@ -52,7 +51,7 @@ Edit `frontend/.env.local` — set `NEXT_PUBLIC_API_URL` to your backend URL.
 | `DATABASE_URL` | ✅ | PostgreSQL connection string, e.g. `postgresql://user:pass@host:5432/rezaryad` |
 | `MAX_BOT_TOKEN` | ✅ | Token obtained from [Max developer portal](https://dev.max.ru) when you register your bot |
 | `SECRET_KEY` | ✅ | Random string ≥32 chars used to sign JWTs. **Never share this.** |
-| `ADMIN_SECRET` | ✅ | Unused at runtime but kept for legacy; set any non-empty string |
+| `ADMIN_PASSWORD` | ✅ | Password for the built-in `admin` account. Set this and the server auto-creates/updates the user on every startup. |
 | `ACQUIRING_API_KEY` | ⬜ | Payment gateway API key |
 | `ACQUIRING_BASE_URL` | ⬜ | Payment gateway base URL |
 | `GOSUSLUGI_CLIENT_ID` | ⬜ | Gosuslugi OAuth client ID (identity verification) |
@@ -81,22 +80,15 @@ prisma db push
 
 ---
 
-### 4. Create the first admin user
+### 4. Set the admin password
 
-The admin panel requires at least one admin account stored in the database.
-Use the bundled helper script:
+The admin panel login is `admin`. Set its password via the `ADMIN_PASSWORD` environment variable in `backend/.env`:
 
-```bash
-cd backend
-python create_admin.py <login> <password>
-
-# Example:
-python create_admin.py admin MySecretPassword123
+```dotenv
+ADMIN_PASSWORD=MySecretPassword123
 ```
 
-- **Login** is the username you will type on the `/login` page of the admin panel.
-- **Password** must be at least 8 characters. It is stored as a bcrypt hash.
-- You can run the script again with the same login to **change the password**.
+The backend automatically creates (or updates) the `admin` account every time it starts. Just restart the server after changing this value to apply a new password.
 
 ---
 
@@ -120,7 +112,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000/login` and sign in with the credentials you created in step 4.
+Open `http://localhost:3000/login` and sign in with login `admin` and the password from `ADMIN_PASSWORD`.
 
 ---
 
@@ -193,7 +185,7 @@ The same domain is used as the **Mini App URL** in Max, so couriers can open it 
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Admin login returns 401 | Wrong login/password, or no admin user in DB | Run `python create_admin.py <login> <password>` |
+| Admin login returns 401 | Wrong password, or `ADMIN_PASSWORD` not set | Set `ADMIN_PASSWORD` in `backend/.env` and restart the server |
 | Admin login returns 422 | Old frontend sending `username` instead of `login` | Pull latest frontend code |
 | Bot does not respond | Webhook not registered, or wrong `MAX_BOT_TOKEN` | Re-register webhook (step 7) |
 | Mini-app auth returns 401 "Invalid initData signature" | `MAX_BOT_TOKEN` mismatch | Ensure backend uses the same token as the registered bot |

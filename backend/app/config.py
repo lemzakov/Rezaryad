@@ -19,14 +19,7 @@ ACQUIRING_BASE_URL: str = os.getenv("ACQUIRING_BASE_URL", "https://api.acquiring
 GOSUSLUGI_CLIENT_ID: str = os.getenv("GOSUSLUGI_CLIENT_ID", "")
 GOSUSLUGI_CLIENT_SECRET: str = os.getenv("GOSUSLUGI_CLIENT_SECRET", "")
 
-_admin_secret = os.getenv("ADMIN_SECRET")
-if not _admin_secret:
-    import logging as _logging  # noqa: F811
-    _logging.getLogger(__name__).warning(
-        "ADMIN_SECRET env var is not set. Using insecure default — DO NOT use in production!"
-    )
-    _admin_secret = "changeme-admin"
-ADMIN_SECRET: str = _admin_secret
+ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "")
 
 CORS_ORIGINS: list[str] = [
     o.strip()

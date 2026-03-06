@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta, timezone
 
-from app.config import CORS_ORIGINS
+from app.config import CORS_ORIGINS, ADMIN_PASSWORD
 from app.db import connect_db, disconnect_db, get_db
 from app.bot.handlers import router as bot_router
 from app.api.couriers import router as couriers_router
@@ -90,9 +90,43 @@ async def expire_old_bookings():
         logger.error(f"expire_old_bookings error: {e}")
 
 
+async def seed_admin() -> None:
+    """Create or update the 'admin' user from the ADMIN_PASSWORD env var."""
+    if not ADMIN_PASSWORD:
+        logger.warning(
+            "ADMIN_PASSWORD env var is not set — no admin account will be created. "
+            "Set ADMIN_PASSWORD to enable admin panel access."
+        )
+        return
+    if len(ADMIN_PASSWORD) < 8:
+        logger.error(
+            "ADMIN_PASSWORD must be at least 8 characters. Admin account was not created/updated."
+        )
+        return
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    db = await get_db()
+    existing = await db.adminuser.find_unique(where={"login": "admin"})
+    if existing:
+        if pwd_context.verify(ADMIN_PASSWORD, existing.passwordHash):
+            logger.info("Admin user 'admin' already up-to-date, skipping update.")
+            return
+        await db.adminuser.update(
+            where={"login": "admin"},
+            data={"passwordHash": pwd_context.hash(ADMIN_PASSWORD)},
+        )
+        logger.info("Admin user 'admin' password updated from ADMIN_PASSWORD env var.")
+    else:
+        await db.adminuser.create(
+            data={"login": "admin", "passwordHash": pwd_context.hash(ADMIN_PASSWORD)}
+        )
+        logger.info("Admin user 'admin' created from ADMIN_PASSWORD env var.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_db()
+    await seed_admin()
     scheduler.add_job(check_open_doors, "interval", minutes=10, id="open_doors")
     scheduler.add_job(check_double_rentals, "interval", minutes=5, id="double_rentals")
     scheduler.add_job(check_anomalies, "interval", minutes=10, id="anomalies")
