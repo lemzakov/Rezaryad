@@ -1,11 +1,14 @@
+import logging
+import os
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.middleware.auth import get_current_admin
 from app.db import get_db
-from app.config import ADMIN_SECRET
 from passlib.context import CryptContext
 from app.middleware.auth import create_admin_token
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -31,10 +34,19 @@ class UpdateLockerRequest(BaseModel):
 
 
 @router.post("/login")
-async def admin_login(req: AdminLoginRequest, db=Depends(get_db)):
+async def admin_login(req: AdminLoginRequest, request: Request, db=Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info("Admin login attempt: login=%r ip=%s", req.login, client_ip)
     admin = await db.adminuser.find_unique(where={"login": req.login})
     if not admin or not pwd_context.verify(req.password, admin.passwordHash):
+        logger.warning(
+            "Admin login FAILED: login=%r ip=%s reason=%s",
+            req.login,
+            client_ip,
+            "user not found" if not admin else "wrong password",
+        )
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    logger.info("Admin login SUCCESS: login=%r ip=%s", req.login, client_ip)
     token = create_admin_token(admin.id)
     return {"access_token": token, "token_type": "bearer"}
 
@@ -224,3 +236,25 @@ async def update_locker(
     data = {k: v for k, v in req.model_dump().items() if v is not None}
     updated = await db.locker.update(where={"id": locker_id}, data=data)
     return {"id": updated.id, "name": updated.name, "isActive": updated.isActive}
+
+
+@router.get("/debug")
+async def debug_config():
+    """
+    Public deployment health-check endpoint.
+    Returns which required environment variables are configured (not their values).
+    """
+    checks = {
+        "DATABASE_URL": bool(os.getenv("DATABASE_URL")),
+        "SECRET_KEY": bool(os.getenv("SECRET_KEY")),
+        "ADMIN_PASSWORD": bool(os.getenv("ADMIN_PASSWORD")),
+        "MAX_BOT_TOKEN": bool(os.getenv("MAX_BOT_TOKEN")),
+        "CORS_ORIGINS": bool(os.getenv("CORS_ORIGINS")),
+    }
+    all_ok = all(checks.values())
+    missing = [k for k, v in checks.items() if not v]
+    return {
+        "status": "ok" if all_ok else "misconfigured",
+        "env_vars": checks,
+        "missing": missing,
+    }

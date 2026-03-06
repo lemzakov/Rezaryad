@@ -1,14 +1,16 @@
 from dotenv import load_dotenv
 import os
+import logging as _logging
 
 load_dotenv()
+
+_cfg_logger = _logging.getLogger(__name__)
 
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 MAX_BOT_TOKEN: str = os.getenv("MAX_BOT_TOKEN", "")
 _secret_key = os.getenv("SECRET_KEY")
 if not _secret_key:
-    import logging as _logging
-    _logging.getLogger(__name__).warning(
+    _cfg_logger.warning(
         "SECRET_KEY env var is not set. Using insecure default — DO NOT use in production!"
     )
     _secret_key = "changeme"
@@ -38,3 +40,18 @@ PENALTY_HOURS = 2
 DOOR_OPEN_FRAUD_SECONDS = 30
 MAX_ACTIVE_SESSIONS = 2
 MAX_ACTIVE_BOOKINGS = 1
+
+# --- Startup env-var validation ---
+_REQUIRED_ENV_VARS = {
+    "DATABASE_URL": DATABASE_URL,
+    "SECRET_KEY": os.getenv("SECRET_KEY", ""),
+    "ADMIN_PASSWORD": ADMIN_PASSWORD,
+}
+
+_missing_vars = [name for name, val in _REQUIRED_ENV_VARS.items() if not val]
+if _missing_vars:
+    _cfg_logger.error(
+        "DEPLOYMENT ERROR: The following required environment variables are not set: %s. "
+        "The application may not work correctly. Set them before deploying.",
+        ", ".join(_missing_vars),
+    )
