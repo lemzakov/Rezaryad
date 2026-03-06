@@ -257,9 +257,31 @@ def _verify_cron_auth(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+@app.post("/api/admin/cron/run-all")
+async def cron_run_all(request: Request):
+    """Called once daily by Vercel Cron (Hobby free plan: 1 cron, daily minimum).
+    Runs all scheduled maintenance tasks in sequence."""
+    _verify_cron_auth(request)
+    results: dict[str, str] = {}
+    for name, fn in [
+        ("expire-bookings", expire_old_bookings),
+        ("check-open-doors", check_open_doors),
+        ("check-double-rentals", check_double_rentals),
+        ("check-anomalies", check_anomalies),
+    ]:
+        try:
+            await fn()
+            results[name] = "ok"
+        except Exception as exc:
+            logger.error("cron run-all: %s failed: %s", name, exc)
+            results[name] = f"error: {exc}"
+    overall = "ok" if all(v == "ok" for v in results.values()) else "partial"
+    return {"status": overall, "task": "run-all", "results": results}
+
+
 @app.post("/api/admin/cron/expire-bookings")
 async def cron_expire_bookings(request: Request):
-    """Called every minute by Vercel Cron to expire past-due bookings."""
+    """Expire past-due bookings. Can be called manually or by an external scheduler."""
     _verify_cron_auth(request)
     await expire_old_bookings()
     return {"status": "ok", "task": "expire-bookings"}
@@ -267,7 +289,7 @@ async def cron_expire_bookings(request: Request):
 
 @app.post("/api/admin/cron/check-open-doors")
 async def cron_check_open_doors(request: Request):
-    """Called every 10 min by Vercel Cron to remind users with door open > 10 min."""
+    """Remind users with door open > 10 min. Can be called manually or by an external scheduler."""
     _verify_cron_auth(request)
     await check_open_doors()
     return {"status": "ok", "task": "check-open-doors"}
@@ -275,7 +297,7 @@ async def cron_check_open_doors(request: Request):
 
 @app.post("/api/admin/cron/check-double-rentals")
 async def cron_check_double_rentals(request: Request):
-    """Called every 5 min by Vercel Cron to remind couriers with 2+ active rentals."""
+    """Remind couriers with 2+ active rentals. Can be called manually or by an external scheduler."""
     _verify_cron_auth(request)
     await check_double_rentals()
     return {"status": "ok", "task": "check-double-rentals"}
@@ -283,7 +305,7 @@ async def cron_check_double_rentals(request: Request):
 
 @app.post("/api/admin/cron/check-anomalies")
 async def cron_check_anomalies(request: Request):
-    """Called every 10 min by Vercel Cron to alert admin about sessions > 2 hours."""
+    """Alert admin about sessions > 2 hours. Can be called manually or by an external scheduler."""
     _verify_cron_auth(request)
     await check_anomalies()
     return {"status": "ok", "task": "check-anomalies"}
