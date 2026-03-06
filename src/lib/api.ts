@@ -1,14 +1,8 @@
 import { getToken } from './auth';
 
-// Use relative paths so the frontend works on any deployment domain without
-// needing NEXT_PUBLIC_API_URL to be set.
-//
-// On Vercel (single project):
-//   /api/* requests are routed by vercel.json to the Python serverless function.
-//
-// In local development (Next.js dev server + FastAPI running separately):
-//   next.config.js rewrites /api/* → http://localhost:8000/api/*
-//   OR set NEXT_PUBLIC_API_URL=http://localhost:8000 to use an explicit URL.
+// API routes are served by Next.js directly at /api/*.
+// Use relative paths so the client works on any deployment domain.
+// Optionally set NEXT_PUBLIC_API_URL to override (e.g. for cross-origin dev setups).
 const BASE_URL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
 
 export interface LoginResponse {
