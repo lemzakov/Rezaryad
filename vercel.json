@@ -1,22 +1,20 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/next"
-    },
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "installCommand": "pip install -r api/requirements.txt && cd backend && python -m prisma generate"
-      }
+  "framework": "nextjs",
+  "installCommand": "python3 -m pip install -r api/requirements.txt && cd frontend && npm install",
+  "buildCommand": "(cd backend && python3 -m prisma generate) && (cd frontend && npm run build)",
+  "outputDirectory": "frontend/.next",
+  "functions": {
+    "api/index.py": {
+      "runtime": "python3.12",
+      "maxDuration": 60,
+      "includeFiles": "backend/**"
     }
-  ],
-  "routes": [
+  },
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api/index.py"
+      "source": "/api/:path*",
+      "destination": "/api/index.py"
     }
   ],
   "crons": [
