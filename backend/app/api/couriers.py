@@ -1,9 +1,17 @@
+import hashlib
+import hmac
+import urllib.parse
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app.middleware.auth import get_current_user
+from app.middleware.auth import get_current_user, create_access_token
 from app.db import get_db
+from app.config import MAX_BOT_TOKEN
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/couriers", tags=["couriers"])
+
+
+class MiniAppAuthRequest(BaseModel):
+    initData: str
 
 
 class AddCardRequest(BaseModel):
@@ -14,6 +22,86 @@ class AddCardRequest(BaseModel):
 class VerifyRequest(BaseModel):
     code: str
     state: str
+
+
+def _verify_max_init_data(init_data: str, bot_token: str) -> dict:
+    """
+    Verify Max messenger mini-app initData.
+
+    Max uses the same verification scheme as Telegram Web Apps:
+    1. Parse the URL-encoded initData string into key-value pairs.
+    2. Extract the 'hash' field.
+    3. Sort the remaining pairs alphabetically, join as 'key=value\n'.
+    4. Compute HMAC-SHA256 using a secret key derived from the bot token.
+       Secret key = HMAC-SHA256("WebAppData", bot_token)
+    5. Compare computed hash with the extracted hash.
+
+    Returns the parsed data dict if valid, raises HTTPException otherwise.
+    """
+    params = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+    received_hash = params.pop("hash", None)
+    if not received_hash:
+        raise HTTPException(status_code=400, detail="Missing hash in initData")
+
+    data_check_string = "\n".join(
+        f"{k}={v}" for k, v in sorted(params.items())
+    )
+    secret_key = hmac.new(
+        b"WebAppData", bot_token.encode(), hashlib.sha256
+    ).digest()
+    computed_hash = hmac.new(
+        secret_key, data_check_string.encode(), hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(computed_hash, received_hash):
+        raise HTTPException(status_code=401, detail="Invalid initData signature")
+
+    return params
+
+
+@router.post("/miniapp-auth")
+async def miniapp_auth(req: MiniAppAuthRequest, db=Depends(get_db)):
+    """
+    Authenticate a Max messenger mini-app user.
+
+    The client (mini-app running inside Max) sends the raw initData string
+    provided by the Max SDK (window.max.initData or equivalent).
+    The server verifies the HMAC signature using the bot token, then finds
+    or creates the user and returns a JWT access token.
+
+    Mini-app setup in Max:
+    - Register your bot at https://dev.max.ru
+    - In the bot settings, add the mini-app URL:
+        https://<your-backend-host>  (or the Vercel frontend URL)
+    - The mini-app URL to enter in Max developer portal is the URL of your
+      deployed frontend, e.g.: https://rezaryad.vercel.app
+    """
+    if not MAX_BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="Bot token not configured")
+
+    params = _verify_max_init_data(req.initData, MAX_BOT_TOKEN)
+
+    # Extract user info from initData
+    user_param = params.get("user")
+    if not user_param:
+        raise HTTPException(status_code=400, detail="No user data in initData")
+
+    import json as _json
+    try:
+        user_data = _json.loads(user_param)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid user data in initData")
+
+    max_id = str(user_data.get("id", ""))
+    if not max_id:
+        raise HTTPException(status_code=400, detail="Missing user id in initData")
+
+    user = await db.user.find_unique(where={"maxId": max_id})
+    if not user:
+        user = await db.user.create(data={"maxId": max_id, "language": "RU"})
+
+    token = create_access_token({"sub": user.id})
+    return {"access_token": token, "token_type": "bearer"}
 
 
 @router.get("/me")

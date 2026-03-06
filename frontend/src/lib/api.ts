@@ -151,10 +151,10 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 }
 
 export const api = {
-  login: (username: string, password: string) =>
+  login: (login: string, password: string) =>
     apiFetch<LoginResponse>('/api/admin/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ login, password }),
     }),
 
   getDashboardStats: () =>
