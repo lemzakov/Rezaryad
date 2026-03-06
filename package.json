@@ -1,0 +1,11 @@
+{
+  "name": "rezaryad",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "cd frontend && npm run dev"
+  }
+}

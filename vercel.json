@@ -1,15 +1,38 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/next"
+  "framework": "nextjs",
+  "installCommand": "python3 -m pip install -r api/requirements.txt && cd frontend && npm install",
+  "buildCommand": "(cd backend && python3 -m prisma generate) && (cd frontend && npm run build)",
+  "outputDirectory": "frontend/.next",
+  "functions": {
+    "api/index.py": {
+      "runtime": "python3.12",
+      "maxDuration": 60,
+      "includeFiles": "backend/**"
     }
-  ],
+  },
   "rewrites": [
     {
-      "source": "/(.*)",
-      "destination": "/frontend/$1"
+      "source": "/api/:path*",
+      "destination": "/api/index.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/admin/cron/expire-bookings",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/admin/cron/check-open-doors",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/admin/cron/check-double-rentals",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/admin/cron/check-anomalies",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
