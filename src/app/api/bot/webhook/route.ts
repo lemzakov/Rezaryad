@@ -21,7 +21,9 @@ async function sendMessage(chatId: string, text: string, keyboard?: unknown): Pr
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000),
     });
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error('sendMessage error:', e instanceof Error ? e.message : String(e));
+  }
 }
 
 async function answerCallback(callbackId: string, text: string): Promise<void> {
@@ -32,7 +34,9 @@ async function answerCallback(callbackId: string, text: string): Promise<void> {
       body: JSON.stringify({ callback_id: callbackId, message: { text } }),
       signal: AbortSignal.timeout(10000),
     });
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error('answerCallback error:', e instanceof Error ? e.message : String(e));
+  }
 }
 
 function inlineKeyboard(buttons: { type: string; text: string; payload?: string; url?: string }[][]): unknown {

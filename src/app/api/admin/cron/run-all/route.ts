@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       await fn();
       results[name] = 'ok';
     } catch (e) {
-      results[name] = `error: ${e}`;
+      results[name] = `error: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
   const overall = Object.values(results).every((v) => v === 'ok') ? 'ok' : 'partial';

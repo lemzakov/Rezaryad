@@ -47,7 +47,12 @@ export async function getAuthenticatedAdmin(req: NextRequest) {
 
 export function verifyCronAuth(req: NextRequest): NextResponse | null {
   const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return null;
+  if (!cronSecret) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('CRON_SECRET is not set: cron endpoints are unprotected');
+    }
+    return null;
+  }
   const auth = req.headers.get('authorization') || '';
   if (auth !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ detail: 'Unauthorized' }, { status: 401 });

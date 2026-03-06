@@ -1,7 +1,12 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { SECRET_KEY, ACCESS_TOKEN_EXPIRE_MINUTES } from './config';
 
-const secret = new TextEncoder().encode(SECRET_KEY);
+function getSecret() {
+  if (!SECRET_KEY) {
+    throw new Error('SECRET_KEY environment variable is required in production');
+  }
+  return new TextEncoder().encode(SECRET_KEY);
+}
 
 export async function createAccessToken(
   data: Record<string, unknown>,
@@ -11,7 +16,7 @@ export async function createAccessToken(
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(`${expiresInMinutes}m`)
-    .sign(secret);
+    .sign(getSecret());
 }
 
 export async function createAdminToken(adminId: string): Promise<string> {
@@ -19,7 +24,7 @@ export async function createAdminToken(adminId: string): Promise<string> {
 }
 
 export async function verifyToken(token: string): Promise<Record<string, unknown>> {
-  const { payload } = await jwtVerify(token, secret);
+  const { payload } = await jwtVerify(token, getSecret());
   return payload as Record<string, unknown>;
 }
 

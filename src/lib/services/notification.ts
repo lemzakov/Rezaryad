@@ -16,8 +16,8 @@ async function sendMessage(chatId: string, text: string, keyboard?: unknown): Pr
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000),
     });
-  } catch {
-    // silently ignore notification errors
+  } catch (e) {
+    console.error('sendMessage error:', e instanceof Error ? e.message : String(e));
   }
 }
 

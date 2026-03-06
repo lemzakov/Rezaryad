@@ -26,7 +26,7 @@ export const MAX_BOT_TOKEN: string = process.env.MAX_BOT_TOKEN || '';
 export const SECRET_KEY: string =
   process.env.SECRET_KEY ||
   process.env.rezaryad_SUPABASE_JWT_SECRET ||
-  'changeme';
+  (process.env.NODE_ENV === 'production' ? '' : 'changeme-dev-only');
 
 export const ACQUIRING_API_KEY: string = process.env.ACQUIRING_API_KEY || '';
 export const ACQUIRING_BASE_URL: string =
