@@ -1,29 +1,8 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.Python
-*.egg-info/
-dist/
-build/
-.eggs/
-*.egg
-.env
-.venv
-venv/
-ENV/
-
-# Prisma generated client cache
-backend/prisma/.cache/
-
 # Node
 node_modules/
 .npm
 
 # Next.js
-frontend/.next/
-frontend/out/
 .next/
 out/
 
@@ -32,3 +11,11 @@ out/
 
 # macOS
 .DS_Store
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Prisma generated
+prisma/generated/

@@ -3,7 +3,7 @@ import { SECRET_KEY, ACCESS_TOKEN_EXPIRE_MINUTES } from './config';
 
 function getSecret() {
   if (!SECRET_KEY) {
-    throw new Error('SECRET_KEY environment variable is required in production');
+    throw new Error('SECRET_KEY environment variable must be set in production');
   }
   return new TextEncoder().encode(SECRET_KEY);
 }

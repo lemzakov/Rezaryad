@@ -28,6 +28,10 @@ export const SECRET_KEY: string =
   process.env.rezaryad_SUPABASE_JWT_SECRET ||
   (process.env.NODE_ENV === 'production' ? '' : 'changeme-dev-only');
 
+if (process.env.NODE_ENV !== 'production' && !process.env.SECRET_KEY && !process.env.rezaryad_SUPABASE_JWT_SECRET) {
+  console.warn('[config] SECRET_KEY is not set — using insecure default. Set SECRET_KEY before deploying to production.');
+}
+
 export const ACQUIRING_API_KEY: string = process.env.ACQUIRING_API_KEY || '';
 export const ACQUIRING_BASE_URL: string =
   process.env.ACQUIRING_BASE_URL || 'https://api.acquiring.example.com';
