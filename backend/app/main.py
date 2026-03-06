@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta, timezone
 
+from app.config import CORS_ORIGINS
 from app.db import connect_db, disconnect_db, get_db
 from app.bot.handlers import router as bot_router
 from app.api.couriers import router as couriers_router
@@ -113,7 +114,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

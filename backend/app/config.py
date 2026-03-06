@@ -7,9 +7,16 @@ DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 MAX_BOT_TOKEN: str = os.getenv("MAX_BOT_TOKEN", "")
 SECRET_KEY: str = os.getenv("SECRET_KEY", "changeme")
 ACQUIRING_API_KEY: str = os.getenv("ACQUIRING_API_KEY", "")
+ACQUIRING_BASE_URL: str = os.getenv("ACQUIRING_BASE_URL", "https://api.acquiring.example.com")
 GOSUSLUGI_CLIENT_ID: str = os.getenv("GOSUSLUGI_CLIENT_ID", "")
 GOSUSLUGI_CLIENT_SECRET: str = os.getenv("GOSUSLUGI_CLIENT_SECRET", "")
 ADMIN_SECRET: str = os.getenv("ADMIN_SECRET", "changeme-admin")
+
+CORS_ORIGINS: list[str] = [
+    o.strip()
+    for o in os.getenv("CORS_ORIGINS", "").split(",")
+    if o.strip()
+] or ["*"]
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days

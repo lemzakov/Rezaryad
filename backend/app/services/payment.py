@@ -1,10 +1,8 @@
 import httpx
 import logging
-from app.config import ACQUIRING_API_KEY
+from app.config import ACQUIRING_API_KEY, ACQUIRING_BASE_URL
 
 logger = logging.getLogger(__name__)
-
-ACQUIRING_BASE = "https://api.acquiring.example.com"  # Replace with real acquiring URL
 
 
 class PaymentService:
@@ -49,7 +47,7 @@ class PaymentService:
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.post(
-                    f"{ACQUIRING_BASE}/charge",
+                    f"{ACQUIRING_BASE_URL}/charge",
                     headers={"Authorization": f"Bearer {ACQUIRING_API_KEY}"},
                     json={"card_token": card_token, "amount": amount, "order_id": payment_id},
                     timeout=30,

@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException
 from app.db import get_db
-from app.config import MAX_BOT_TOKEN, MAX_API_BASE
+from app.config import MAX_BOT_TOKEN, MAX_API_BASE, CORS_ORIGINS
 from app.bot.messages import get_msg
 from app.bot.keyboards import (
     language_keyboard, main_menu_keyboard, locker_keyboard,
@@ -95,8 +95,9 @@ async def handle_locker_info(chat_id: str, user, locker, db) -> None:
     free_count = len(free_cells)
 
     tariffs = await db.tariff.find_many(where={"isSubscription": False})
+    currency = {"RU": "руб/мин", "UZ": "so'm/daq", "TJ": "сомонӣ/дақ"}.get(lang, "руб/мин")
     tariff_lines = "\n".join(
-        f"  • {t.name}: {t.pricePerMinute} руб/мин"
+        f"  • {t.name}: {t.pricePerMinute} {currency}"
         for t in tariffs
     )
 
