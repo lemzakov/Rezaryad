@@ -243,18 +243,37 @@ async def debug_config():
     """
     Public deployment health-check endpoint.
     Returns which required environment variables are configured (not their values).
+    Supabase-provided alternatives are also checked so Vercel deployments show
+    green even when DATABASE_URL is not set explicitly.
     """
+    db_url = bool(
+        os.getenv("DATABASE_URL")
+        or os.getenv("rezaryad_POSTGRES_PRISMA_URL")
+        or os.getenv("POSTGRES_PRISMA_URL")
+        or os.getenv("rezaryad_POSTGRES_URL")
+    )
+    secret = bool(
+        os.getenv("SECRET_KEY")
+        or os.getenv("rezaryad_SUPABASE_JWT_SECRET")
+    )
     checks = {
-        "DATABASE_URL": bool(os.getenv("DATABASE_URL")),
-        "SECRET_KEY": bool(os.getenv("SECRET_KEY")),
+        "DATABASE_URL": db_url,
+        "SECRET_KEY": secret,
         "ADMIN_PASSWORD": bool(os.getenv("ADMIN_PASSWORD")),
         "MAX_BOT_TOKEN": bool(os.getenv("MAX_BOT_TOKEN")),
         "CORS_ORIGINS": bool(os.getenv("CORS_ORIGINS")),
+    }
+    # Supabase-specific vars for informational purposes
+    supabase_vars = {
+        "rezaryad_POSTGRES_PRISMA_URL": bool(os.getenv("rezaryad_POSTGRES_PRISMA_URL")),
+        "rezaryad_POSTGRES_URL_NON_POOLING": bool(os.getenv("rezaryad_POSTGRES_URL_NON_POOLING")),
+        "rezaryad_SUPABASE_JWT_SECRET": bool(os.getenv("rezaryad_SUPABASE_JWT_SECRET")),
     }
     all_ok = all(checks.values())
     missing = [k for k, v in checks.items() if not v]
     return {
         "status": "ok" if all_ok else "misconfigured",
         "env_vars": checks,
+        "supabase_vars": supabase_vars,
         "missing": missing,
     }

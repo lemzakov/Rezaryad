@@ -1,4 +1,7 @@
 import logging
+import os
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -90,6 +93,47 @@ async def expire_old_bookings():
         logger.error(f"expire_old_bookings error: {e}")
 
 
+def apply_schema() -> None:
+    """
+    Push the Prisma schema to the database so all tables exist.
+
+    Uses `prisma db push --accept-data-loss`, which is idempotent — when the
+    database schema already matches the Prisma schema it does nothing.  The
+    --accept-data-loss flag suppresses the interactive prompt that Prisma
+    normally shows when a schema change would drop data (e.g. removing a
+    column); it does NOT force destructive changes on its own.  Schema changes
+    that would result in data loss are still applied if they are present in
+    schema.prisma, so keep the schema file accurate.
+
+    The migration uses DIRECT_DATABASE_URL so it bypasses PgBouncer, which
+    is required on Supabase where the pooled URL rejects DDL statements.
+    """
+    from app.config import DATABASE_URL
+    if not DATABASE_URL:
+        logger.warning("DATABASE_URL not set — skipping schema apply.")
+        return
+    logger.info("Applying database schema via prisma db push …")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "prisma", "db", "push", "--accept-data-loss"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=os.environ.copy(),
+        )
+        if result.returncode == 0:
+            logger.info("Schema applied successfully.\n%s", result.stdout.strip())
+        else:
+            logger.error(
+                "prisma db push failed (exit code %d).\nSTDOUT: %s\nSTDERR: %s",
+                result.returncode,
+                result.stdout,
+                result.stderr,
+            )
+    except Exception as exc:
+        logger.error("Schema apply error: %s", exc)
+
+
 async def seed_admin() -> None:
     """Create or update the 'admin' user from the ADMIN_PASSWORD env var."""
     if not ADMIN_PASSWORD:
@@ -125,6 +169,7 @@ async def seed_admin() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    apply_schema()  # ensure all DB tables exist before connecting
     await connect_db()
     await seed_admin()
     scheduler.add_job(check_open_doors, "interval", minutes=10, id="open_doors")
