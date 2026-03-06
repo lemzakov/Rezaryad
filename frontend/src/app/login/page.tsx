@@ -6,7 +6,7 @@ import { setToken, isAuthenticated } from '@/lib/auth';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState('');
+  const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,7 +22,7 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const res = await api.login(username, password);
+      const res = await api.login(login, password);
       setToken(res.access_token);
       router.replace('/dashboard');
     } catch (err: unknown) {
@@ -45,8 +45,8 @@ export default function LoginPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Имя пользователя</label>
             <input
               type="text"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
+              value={login}
+              onChange={e => setLogin(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="admin"
               required
