@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta, timezone
@@ -20,6 +20,11 @@ from app.api.admin import router as admin_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Vercel sets VERCEL=1 in both build and runtime environments.
+# On Vercel, APScheduler cannot be used (serverless functions have no persistent
+# process between requests). Cron jobs are handled via Vercel Cron endpoints instead.
+IS_VERCEL = bool(os.getenv("VERCEL"))
 
 scheduler = AsyncIOScheduler()
 
@@ -107,11 +112,16 @@ def apply_schema() -> None:
 
     The migration uses DIRECT_DATABASE_URL so it bypasses PgBouncer, which
     is required on Supabase where the pooled URL rejects DDL statements.
+
+    Runs from the `backend/` directory so the Prisma CLI finds
+    `backend/prisma/schema.prisma` automatically.
     """
     from app.config import DATABASE_URL
     if not DATABASE_URL:
         logger.warning("DATABASE_URL not set — skipping schema apply.")
         return
+    # Run from backend/ so `prisma db push` finds prisma/schema.prisma
+    backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     logger.info("Applying database schema via prisma db push …")
     try:
         result = subprocess.run(
@@ -120,6 +130,7 @@ def apply_schema() -> None:
             text=True,
             timeout=120,
             env=os.environ.copy(),
+            cwd=backend_dir,
         )
         if result.returncode == 0:
             logger.info("Schema applied successfully.\n%s", result.stdout.strip())
@@ -172,14 +183,20 @@ async def lifespan(app: FastAPI):
     apply_schema()  # ensure all DB tables exist before connecting
     await connect_db()
     await seed_admin()
-    scheduler.add_job(check_open_doors, "interval", minutes=10, id="open_doors")
-    scheduler.add_job(check_double_rentals, "interval", minutes=5, id="double_rentals")
-    scheduler.add_job(check_anomalies, "interval", minutes=10, id="anomalies")
-    scheduler.add_job(expire_old_bookings, "interval", minutes=1, id="expire_bookings")
-    scheduler.start()
-    logger.info("Rezaryad backend started")
+    if not IS_VERCEL:
+        # APScheduler needs a persistent process — it doesn't work in Vercel
+        # serverless functions where each invocation is independent.
+        # On Vercel, background tasks run via Vercel Cron Jobs hitting the
+        # /api/admin/cron/* endpoints defined at the bottom of this file.
+        scheduler.add_job(check_open_doors, "interval", minutes=10, id="open_doors")
+        scheduler.add_job(check_double_rentals, "interval", minutes=5, id="double_rentals")
+        scheduler.add_job(check_anomalies, "interval", minutes=10, id="anomalies")
+        scheduler.add_job(expire_old_bookings, "interval", minutes=1, id="expire_bookings")
+        scheduler.start()
+    logger.info("Rezaryad backend started (serverless=%s)", IS_VERCEL)
     yield
-    scheduler.shutdown(wait=False)
+    if not IS_VERCEL:
+        scheduler.shutdown(wait=False)
     await disconnect_db()
     logger.info("Rezaryad backend stopped")
 
@@ -216,3 +233,57 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+# ---------------------------------------------------------------------------
+# Vercel Cron Job endpoints
+# These replace APScheduler when deployed on Vercel (serverless).  Vercel
+# calls these URLs on the configured schedule (see vercel.json → "crons").
+#
+# Security: if CRON_SECRET is set in the Vercel project environment, Vercel
+# automatically sends `Authorization: Bearer <CRON_SECRET>` with every cron
+# request.  Set CRON_SECRET to a random secret to prevent unauthorised calls.
+# ---------------------------------------------------------------------------
+
+def _verify_cron_auth(request: Request) -> None:
+    """Reject the request if CRON_SECRET is configured but the header is wrong."""
+    import secrets as _secrets
+    cron_secret = os.getenv("CRON_SECRET")
+    if not cron_secret:
+        return  # No secret configured; skip auth check (acceptable in dev)
+    auth = request.headers.get("authorization", "")
+    expected = f"Bearer {cron_secret}"
+    if not _secrets.compare_digest(auth, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.post("/api/admin/cron/expire-bookings")
+async def cron_expire_bookings(request: Request):
+    """Called every minute by Vercel Cron to expire past-due bookings."""
+    _verify_cron_auth(request)
+    await expire_old_bookings()
+    return {"status": "ok", "task": "expire-bookings"}
+
+
+@app.post("/api/admin/cron/check-open-doors")
+async def cron_check_open_doors(request: Request):
+    """Called every 10 min by Vercel Cron to remind users with door open > 10 min."""
+    _verify_cron_auth(request)
+    await check_open_doors()
+    return {"status": "ok", "task": "check-open-doors"}
+
+
+@app.post("/api/admin/cron/check-double-rentals")
+async def cron_check_double_rentals(request: Request):
+    """Called every 5 min by Vercel Cron to remind couriers with 2+ active rentals."""
+    _verify_cron_auth(request)
+    await check_double_rentals()
+    return {"status": "ok", "task": "check-double-rentals"}
+
+
+@app.post("/api/admin/cron/check-anomalies")
+async def cron_check_anomalies(request: Request):
+    """Called every 10 min by Vercel Cron to alert admin about sessions > 2 hours."""
+    _verify_cron_auth(request)
+    await check_anomalies()
+    return {"status": "ok", "task": "check-anomalies"}

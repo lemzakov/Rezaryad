@@ -164,20 +164,63 @@ Use the returned `access_token` as a Bearer token for all subsequent courier API
 
 ## Deployment
 
-### Backend (any VPS / Railway / Render)
+### Single Vercel Project (recommended)
 
-- Set all environment variables from `backend/.env.example`.
+The whole stack — Next.js admin panel **and** FastAPI backend — deploys as
+**one Vercel project** from the repository root.
+
+1. **Import the repo root** (not the `frontend/` subfolder) as a new Vercel project.
+2. Set the following **Environment Variables** in Vercel's project settings:
+
+| Variable | Required | Description |
+|---|---|---|
+| `ADMIN_PASSWORD` | ✅ | Password for the built-in `admin` account |
+| `MAX_BOT_TOKEN` | ✅ | Token from the [Max developer portal](https://dev.max.ru) |
+| `SECRET_KEY` | ⬜ | Random string ≥ 32 chars for JWTs — auto-filled from `rezaryad_SUPABASE_JWT_SECRET` if absent |
+| `CRON_SECRET` | ⬜ | Random secret to protect the `/api/admin/cron/*` endpoints |
+| `CORS_ORIGINS` | ⬜ | Leave empty — frontend and backend share the same domain |
+
+> **Supabase** — Connect the Supabase integration in the Vercel dashboard. It
+> automatically injects `rezaryad_POSTGRES_PRISMA_URL`,
+> `rezaryad_POSTGRES_URL_NON_POOLING`, etc.  `DATABASE_URL` and
+> `DIRECT_DATABASE_URL` are resolved from those automatically (see
+> `backend/app/config.py`). You do **not** need to set `DATABASE_URL` manually.
+>
+> **`NEXT_PUBLIC_API_URL`** — Do **not** set this in the Vercel project.  The
+> frontend uses relative `/api/*` paths; Vercel routes them to the Python
+> serverless function on the same domain.
+
+3. Deploy. Vercel will:
+   - Build the Next.js frontend from `frontend/`
+   - Build the Python serverless function from `api/index.py`
+   - Run `prisma generate` to create the Prisma Python client
+   - On first cold-start, `apply_schema()` runs `prisma db push` to create all DB tables
+   - `seed_admin()` creates the `admin` user from `ADMIN_PASSWORD`
+
+4. **Background tasks** run via Vercel Cron Jobs (configured in `vercel.json`):
+
+| Endpoint | Schedule | Task |
+|---|---|---|
+| `/api/admin/cron/expire-bookings` | every minute | Expire past-due bookings |
+| `/api/admin/cron/check-open-doors` | every 10 min | Remind users with door open > 10 min |
+| `/api/admin/cron/check-double-rentals` | every 5 min | Remind couriers with 2+ active sessions |
+| `/api/admin/cron/check-anomalies` | every 10 min | Alert admin about sessions > 2 hours |
+
+> Vercel Cron Jobs are available on the Hobby plan and above.
+
+The admin panel URL (e.g., `https://rezaryad.vercel.app/login`) is what operators
+open in a browser.  The same domain is used as the **Mini App URL** in Max.
+
+---
+
+### Alternative: Separate backend + Vercel frontend
+
+If you prefer to host the Python backend on a VPS, Railway, or Render:
+
+- Deploy the `backend/` directory and set all env vars from `backend/.env.example`.
 - Run: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- Make sure the server is reachable over HTTPS for the Max webhook.
-
-### Frontend (Vercel)
-
-- Import the `frontend/` directory as a Next.js project.
-- Set `NEXT_PUBLIC_API_URL` to your backend's public HTTPS URL in Vercel's environment settings.
-- Deploy.
-
-The admin panel URL (e.g., `https://rezaryad.vercel.app/login`) is what operators open in a browser.
-The same domain is used as the **Mini App URL** in Max, so couriers can open it inside the messenger.
+- In Vercel, import only the `frontend/` directory and set  
+  `NEXT_PUBLIC_API_URL=https://your-backend-domain.com` in the Vercel project.
 
 ---
 
@@ -185,8 +228,11 @@ The same domain is used as the **Mini App URL** in Max, so couriers can open it 
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Admin login returns 401 | Wrong password, or `ADMIN_PASSWORD` not set | Set `ADMIN_PASSWORD` in `backend/.env` and restart the server |
+| Admin login returns 401 | Wrong password, or `ADMIN_PASSWORD` not set | Set `ADMIN_PASSWORD` in `backend/.env` (local) or Vercel env settings and restart |
 | Admin login returns 422 | Old frontend sending `username` instead of `login` | Pull latest frontend code |
 | Bot does not respond | Webhook not registered, or wrong `MAX_BOT_TOKEN` | Re-register webhook (step 7) |
 | Mini-app auth returns 401 "Invalid initData signature" | `MAX_BOT_TOKEN` mismatch | Ensure backend uses the same token as the registered bot |
-| `DATABASE_URL` errors | DB not running or wrong credentials | Check PostgreSQL connection string |
+| `DATABASE_URL` errors | DB not running or wrong credentials | Check PostgreSQL connection string; on Vercel, verify the Supabase integration is connected |
+| Vercel build fails — "module 'prisma' not found" | `prisma generate` didn't run | Check the `installCommand` in `vercel.json`; ensure `api/requirements.txt` exists |
+| Frontend calls fail on Vercel with 404 | `NEXT_PUBLIC_API_URL` set to wrong value | Remove `NEXT_PUBLIC_API_URL` from Vercel env — use relative URLs (default) |
+| Cron jobs not running | Not on a Vercel plan that supports Cron | Enable Vercel Cron or upgrade plan |

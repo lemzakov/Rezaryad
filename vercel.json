@@ -4,6 +4,37 @@
     {
       "src": "frontend/package.json",
       "use": "@vercel/next"
+    },
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": {
+        "installCommand": "pip install -r api/requirements.txt && cd backend && python -m prisma generate"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/index.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/admin/cron/expire-bookings",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/admin/cron/check-open-doors",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/admin/cron/check-double-rentals",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/admin/cron/check-anomalies",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
