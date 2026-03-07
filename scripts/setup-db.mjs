@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 /**
- * Initialize the database schema and optional seed data.
+ * Initialize the database schema and seed data.
  *
- * Run automatically as part of the build (postbuild) when DATABASE_URL is set.
+ * Run automatically as part of the build (postbuild).
  * Safe to re-run: all DDL uses CREATE ... IF NOT EXISTS / DO ... END blocks.
+ * Seed data uses ON CONFLICT DO NOTHING so duplicate rows are safe.
  *
- * Required env vars:
- *   DATABASE_URL — PostgreSQL connection string from Supabase:
- *                  Project Settings → Database → Connection string → URI
- *                  e.g. postgresql://postgres:[password]@db.[ref].supabase.co:5432/postgres
+ * Connection is read from these env vars (first one found wins):
+ *   rezaryad_POSTGRES_URL_NON_POOLING  — direct Supabase connection (required for DDL)
+ *   rezaryad_POSTGRES_URL              — pooler URL (fallback, DDL may fail with pgbouncer)
+ *   DATABASE_URL                       — generic fallback
+ *
+ * Both are set automatically by Vercel when you connect a Supabase integration.
  *
  * Optional:
- *   SEED_DB=true  — also run supabase/seed.sql (sample lockers, couriers, tariffs)
+ *   SEED_DB=true  — force re-run of supabase/seed.sql even if schema already existed
  */
 
 import { createRequire } from 'module';
@@ -39,13 +42,17 @@ try {
   // .env.local not present — that's fine
 }
 
-const databaseUrl = process.env.DATABASE_URL || '';
+const databaseUrl =
+  process.env.rezaryad_POSTGRES_URL_NON_POOLING ||
+  process.env.rezaryad_POSTGRES_URL ||
+  process.env.DATABASE_URL ||
+  '';
 
 if (!databaseUrl) {
   console.warn(
-    '[setup-db] ⚠ Skipped: DATABASE_URL is not set.\n' +
-      '  Set it in Vercel → Settings → Environment Variables to auto-initialize the schema on deploy.\n' +
-      '  Get the value from: Supabase dashboard → Project Settings → Database → Connection string → URI',
+    '[setup-db] ⚠ Skipped: no PostgreSQL connection string found.\n' +
+      '  Expected one of: rezaryad_POSTGRES_URL_NON_POOLING, rezaryad_POSTGRES_URL, DATABASE_URL\n' +
+      '  These are set automatically when you connect a Supabase integration in Vercel.',
   );
   process.exit(0);
 }
@@ -103,25 +110,32 @@ if (schemaExists) {
     process.exit(1);
   }
 
-  // ── Run seed.sql (optional) ────────────────────────────────────────────
-  if (process.env.SEED_DB === 'true') {
-    const seedPath = resolve(__dirname, '..', 'supabase', 'seed.sql');
-    let seedSql;
-    try {
-      seedSql = readFileSync(seedPath, 'utf8');
-    } catch {
-      console.warn(`[setup-db] ⚠ seed.sql not found at ${seedPath}, skipping.`);
-    }
-    if (seedSql) {
-      try {
-        await client.query(seedSql);
-        console.log('[setup-db] ✓ Seed data inserted.');
-      } catch (err) {
-        // Seed errors (e.g. duplicate key) are non-fatal.
-        console.warn('[setup-db] ⚠ Seed partially failed (may already be seeded):', err.message);
-      }
-    }
-  }
+  // ── Run seed.sql automatically on first init ───────────────────────────
+  await runSeed('Seed data inserted.');
+}
+
+// ── Force re-seed if SEED_DB=true (even when schema already existed) ───────
+if (schemaExists && process.env.SEED_DB === 'true') {
+  await runSeed('Seed data re-applied (SEED_DB=true).');
 }
 
 await client.end();
+
+/** Read and execute supabase/seed.sql. Errors are non-fatal. */
+async function runSeed(successMessage) {
+  const seedPath = resolve(__dirname, '..', 'supabase', 'seed.sql');
+  let seedSql;
+  try {
+    seedSql = readFileSync(seedPath, 'utf8');
+  } catch {
+    console.warn(`[setup-db] ⚠ seed.sql not found at ${seedPath}, skipping.`);
+    return;
+  }
+  try {
+    await client.query(seedSql);
+    console.log(`[setup-db] ✓ ${successMessage}`);
+  } catch (err) {
+    // Seed errors (e.g. duplicate key) are non-fatal.
+    console.warn('[setup-db] ⚠ Seed partially failed (may already be seeded):', err.message);
+  }
+}
