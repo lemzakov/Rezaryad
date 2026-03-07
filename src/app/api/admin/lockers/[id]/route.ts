@@ -2,6 +2,36 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/db';
 import { getAuthenticatedAdmin } from '@/lib/server-auth';
 
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { error } = await getAuthenticatedAdmin(req);
+  if (error) return error;
+
+  const { id } = await params;
+  const { data: locker } = await supabase
+    .from('lockers')
+    .select('*, cells(*)')
+    .eq('id', id)
+    .maybeSingle();
+  if (!locker) return NextResponse.json({ detail: 'Locker not found' }, { status: 404 });
+
+  const cells: { status: string }[] = locker.cells ?? [];
+  const freeCells = cells.filter((c) => c.status === 'FREE').length;
+  const activeCells = cells.filter((c) => c.status === 'BUSY').length;
+
+  return NextResponse.json({
+    id: locker.id,
+    name: locker.name,
+    address: locker.address,
+    lat: locker.lat,
+    lon: locker.lon,
+    qr_code: locker.qr_code,
+    is_active: locker.is_active,
+    total_cells: cells.length,
+    free_cells: freeCells,
+    active_cells: activeCells,
+  });
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error } = await getAuthenticatedAdmin(req);
   if (error) return error;
@@ -34,4 +64,3 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     isActive: updated.is_active,
   });
 }
-

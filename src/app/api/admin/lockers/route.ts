@@ -8,16 +8,23 @@ export async function GET(req: NextRequest) {
 
   const { data: lockers } = await supabase.from('lockers').select('*, cells(*)');
   return NextResponse.json(
-    (lockers ?? []).map((l) => ({
-      id: l.id,
-      name: l.name,
-      address: l.address,
-      lat: l.lat,
-      lon: l.lon,
-      qrCode: l.qr_code,
-      isActive: l.is_active,
-      cellCount: (l.cells ?? []).length,
-    })),
+    (lockers ?? []).map((l) => {
+      const cells: { status: string }[] = l.cells ?? [];
+      const freeCells = cells.filter((c) => c.status === 'FREE').length;
+      const activeCells = cells.filter((c) => c.status === 'BUSY').length;
+      return {
+        id: l.id,
+        name: l.name,
+        address: l.address,
+        lat: l.lat,
+        lon: l.lon,
+        qr_code: l.qr_code,
+        is_active: l.is_active,
+        total_cells: cells.length,
+        free_cells: freeCells,
+        active_cells: activeCells,
+      };
+    }),
   );
 }
 

@@ -208,4 +208,21 @@ export const api = {
 
   getCourierStats: (id: number) =>
     apiFetch<CourierStats>(`/api/admin/couriers/${id}/stats`),
+
+  getDebugInfo: () =>
+    apiFetch<{
+      status: string;
+      env_vars: Record<string, boolean>;
+      missing: string[];
+      db: { status: string; admin_count: number | string; seeded: boolean };
+    }>('/api/admin/debug'),
+
+  registerWebhook: (webhookUrl: string) =>
+    apiFetch<{ success: boolean; maxResponse: unknown }>('/api/admin/settings/webhook', {
+      method: 'POST',
+      body: JSON.stringify({ webhookUrl }),
+    }),
+
+  getWebhookStatus: () =>
+    apiFetch<{ success: boolean; subscriptions: unknown }>('/api/admin/settings/webhook'),
 };
