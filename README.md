@@ -1,246 +1,163 @@
 # Rezaryad Project
 
-Rezaryad is a battery-locker rental system for couriers, built with FastAPI (backend) and Next.js (frontend). Couriers interact with the system through a Max messenger bot and mini-app; operators manage everything through a web admin panel.
+Rezaryad is a battery-locker rental system for couriers. Couriers interact with the system through a **MAX messenger bot** and a **mini-app** (accessible at `/courier`); operators manage everything through a web admin panel.
 
-## Project Structure
+## Architecture
+
+This is a **unified Next.js 15 application** deployed as a single Vercel project:
 
 ```
 Rezaryad/
-├── backend/          # FastAPI server, Prisma ORM, bot handlers
+├── src/
 │   ├── app/
-│   │   ├── api/      # REST API routes (admin, couriers, lockers, …)
-│   │   ├── bot/      # Max messenger bot webhook handlers
-│   │   ├── middleware/ # JWT auth helpers
-│   │   ├── services/ # Business logic (booking, session, payment, …)
-│   │   ├── config.py # All env-var driven settings
-│   │   ├── db.py     # Prisma async client
-│   │   └── main.py   # FastAPI app + scheduler
-│   ├── prisma/
-│   │   └── schema.prisma
-│   ├── requirements.txt
-│   └── .env.example
-└── frontend/         # Next.js 14 admin panel (Vercel-ready)
-    ├── src/
-    │   ├── app/      # App router pages (login, dashboard, …)
-    │   └── lib/      # API client, auth helpers
-    └── .env.example
+│   │   ├── api/                   # REST API routes (Next.js Route Handlers)
+│   │   │   ├── admin/             # Admin-only endpoints
+│   │   │   │   ├── couriers/      # Courier management
+│   │   │   │   ├── lockers/       # Locker management
+│   │   │   │   ├── max/           # MAX messenger debug API
+│   │   │   │   ├── sessions/      # Session management
+│   │   │   │   ├── settings/      # Webhook configuration
+│   │   │   │   ├── stats/         # Statistics
+│   │   │   │   ├── anomalies/     # Anomaly detection
+│   │   │   │   ├── cron/          # Scheduled jobs
+│   │   │   │   ├── debug/         # System diagnostics
+│   │   │   │   └── login/         # Admin authentication
+│   │   │   ├── bot/webhook/       # MAX messenger webhook handler
+│   │   │   ├── couriers/          # Courier self-service API
+│   │   │   ├── bookings/          # Booking API
+│   │   │   ├── sessions/          # Session API
+│   │   │   ├── lockers/           # Locker API
+│   │   │   └── tariffs/           # Tariff API
+│   │   ├── courier/               # 📱 Courier mini-app (MAX WebApp)
+│   │   ├── dashboard/             # Admin panel pages
+│   │   │   ├── couriers/          # Courier management
+│   │   │   ├── lockers/           # Locker management
+│   │   │   ├── sessions/          # Session management
+│   │   │   ├── settings/          # System settings + MAX debug
+│   │   │   ├── stats/             # Statistics
+│   │   │   └── anomalies/         # Anomaly monitoring
+│   │   └── login/                 # Admin login page
+│   └── lib/
+│       ├── api.ts                 # Frontend API client
+│       ├── auth.ts                # Client-side JWT helper
+│       ├── config.ts              # Environment variable config
+│       ├── db.ts                  # Supabase client
+│       ├── jwt.ts                 # JWT signing/verification
+│       ├── server-auth.ts         # Server-side auth helpers
+│       ├── types.ts               # TypeScript types
+│       └── services/              # Business logic
+├── supabase/
+│   ├── schema.sql                 # Database schema (run in Supabase SQL editor)
+│   └── seed.sql                   # Seed data
+└── scripts/
+    ├── setup-db.mjs               # Auto-runs schema on deploy
+    └── create-admin.mjs           # Auto-creates admin user on deploy
 ```
+
+---
+
+## Key URLs
+
+| URL | Description |
+|-----|-------------|
+| `https://rezaryad.vercel.app/login` | Admin panel login |
+| `https://rezaryad.vercel.app/dashboard` | Admin panel dashboard |
+| **`https://rezaryad.vercel.app/courier`** | **📱 Courier mini-app (use this URL in MAX developer portal)** |
+| `https://rezaryad.vercel.app/api/bot/webhook` | MAX messenger webhook endpoint |
 
 ---
 
 ## Quick-start
 
-### 1. Clone and configure environment variables
+### 1. Clone and deploy to Vercel
 
 ```bash
-# Backend
-cp backend/.env.example backend/.env
-# Frontend
-cp frontend/.env.example frontend/.env.local
+git clone https://github.com/lemzakov/Rezaryad.git
 ```
 
-Edit `backend/.env` with your real values (see section below).
-Edit `frontend/.env.local` — set `NEXT_PUBLIC_API_URL` to your backend URL.
+Import the repo root as a new Vercel project (Framework Preset: **Next.js**).
 
----
+### 2. Connect Supabase
 
-### 2. Backend environment variables (`backend/.env`)
+In the Vercel dashboard, go to **Integrations** → connect your Supabase project. This automatically injects the required environment variables.
+
+### 3. Set Environment Variables in Vercel
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | ✅ | PostgreSQL connection string, e.g. `postgresql://user:pass@host:5432/rezaryad` |
-| `MAX_BOT_TOKEN` | ✅ | Token obtained from [Max developer portal](https://dev.max.ru) when you register your bot |
-| `SECRET_KEY` | ✅ | Random string ≥32 chars used to sign JWTs. **Never share this.** |
-| `ADMIN_PASSWORD` | ✅ | Password for the built-in `admin` account. Set this and the server auto-creates/updates the user on every startup. |
-| `ACQUIRING_API_KEY` | ⬜ | Payment gateway API key |
-| `ACQUIRING_BASE_URL` | ⬜ | Payment gateway base URL |
-| `GOSUSLUGI_CLIENT_ID` | ⬜ | Gosuslugi OAuth client ID (identity verification) |
-| `GOSUSLUGI_CLIENT_SECRET` | ⬜ | Gosuslugi OAuth client secret |
-| `CORS_ORIGINS` | ⬜ | Comma-separated list of allowed frontend origins, e.g. `https://rezaryad.vercel.app`. Leave empty to allow all origins (dev only). |
+| `ADMIN_LOGIN` | ✅ | Admin panel username |
+| `ADMIN_PASSWORD` | ✅ | Admin panel password (min 8 chars) |
+| `MAX_BOT_TOKEN` | ✅ | Bot token from [Max developer portal](https://dev.max.ru) |
+| `SECRET_KEY` | ⬜ | Random ≥32-char string for JWT signing. Falls back to `rezaryad_SUPABASE_JWT_SECRET`. |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | From Supabase project settings → API |
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Your Supabase project URL |
+| `CRON_SECRET` | ⬜ | Secret for Vercel Cron auth |
 
-Generate a secure `SECRET_KEY`:
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
+### 4. Initialize Database
+
+After deployment, run the schema manually in the Supabase SQL editor:
+- Open `supabase/schema.sql` and execute it in your Supabase project's SQL editor.
+- Alternatively, the `scripts/setup-db.mjs` postbuild script auto-applies the schema on each Vercel deploy if `rezaryad_POSTGRES_URL_NON_POOLING` is available.
+
+### 5. Register the MAX Bot Webhook
+
+After deployment, go to **Admin Panel → Settings → MAX Messenger → Webhook** and register:
+
+```
+https://rezaryad.vercel.app/api/bot/webhook
 ```
 
----
-
-### 3. Install dependencies & run database migrations
-
+Or use curl:
 ```bash
-cd backend
-pip install -r requirements.txt
-
-# Generate the Prisma client
-prisma generate
-
-# Apply database migrations (creates all tables)
-prisma db push
-```
-
----
-
-### 4. Set the admin password
-
-The admin panel login is `admin`. Set its password via the `ADMIN_PASSWORD` environment variable in `backend/.env`:
-
-```dotenv
-ADMIN_PASSWORD=MySecretPassword123
-```
-
-The backend automatically creates (or updates) the `admin` account every time it starts. Just restart the server after changing this value to apply a new password.
-
----
-
-### 5. Start the backend server
-
-```bash
-cd backend
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-The API will be available at `http://localhost:8000`.
-Interactive docs: `http://localhost:8000/docs`
-
----
-
-### 6. Start the frontend (admin panel)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:3000/login` and sign in with login `admin` and the password from `ADMIN_PASSWORD`.
-
----
-
-### 7. Register the Max messenger bot webhook
-
-After the backend is publicly reachable (e.g., deployed on a VPS or exposed via `ngrok`), register the webhook with Max:
-
-```bash
-curl -X POST "https://botapi.max.ru/subscriptions" \
+curl -X POST "https://botapi.max.ru/subscriptions?access_token=<MAX_BOT_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://<your-public-backend-host>/bot/webhook",
+    "url": "https://rezaryad.vercel.app/api/bot/webhook",
     "update_types": ["message_created", "message_callback"]
-  }' \
-  "?access_token=<MAX_BOT_TOKEN>"
+  }'
 ```
-
-Replace `<your-public-backend-host>` and `<MAX_BOT_TOKEN>` with your values.
 
 ---
 
-### 8. Set up the Mini App in Max (for courier authentication)
+## Setting Up the Courier Mini-App in MAX
 
-1. Log in to the [Max developer portal](https://dev.max.ru).
+The courier registration app is at: **`https://rezaryad.vercel.app/courier`**
+
+1. Log in to the [MAX developer portal](https://dev.max.ru).
 2. Open your bot settings → **Mini App** section.
-3. Set the **Mini App URL** to your deployed **frontend** URL, e.g.:
+3. Set the **Mini App URL** to:
    ```
-   https://rezaryad.vercel.app
+   https://rezaryad.vercel.app/courier
    ```
 4. Save the settings.
 
-When a courier opens the mini-app inside Max, the app receives an `initData` string from the Max SDK. Send it to the backend to obtain a JWT:
+### Courier Registration Flow
 
-```http
-POST /api/couriers/miniapp-auth
-Content-Type: application/json
-
-{ "initData": "<raw initData string from Max SDK>" }
-```
-
-Response:
-```json
-{ "access_token": "eyJ...", "token_type": "bearer" }
-```
-
-Use the returned `access_token` as a Bearer token for all subsequent courier API calls (`Authorization: Bearer <token>`).
+When a courier opens the mini-app inside MAX messenger:
+1. The app automatically receives their **MAX ID** from the WebApp SDK.
+2. The courier enters their **name**.
+3. After submitting, a registration request is created with status **"Заявка на регистрацию"** (Pending Registration).
+4. The admin sees the request in **Admin Panel → Couriers** with a yellow "⏳ Заявка" badge.
+5. The admin clicks **"✓ Одобрить"** (Approve) to activate the courier.
+6. The courier is marked as active and verified.
 
 ---
 
-## Deployment
+## MAX Messenger Debug Panel
 
-### Single Vercel Project (recommended)
+In **Admin Panel → Settings → MAX Messenger → 🔬 Отладка**, you can:
+- **View all subscribers** (couriers who have interacted with the bot)
+- **Browse message history** — both incoming messages from couriers and outgoing notifications
+- **Send test messages** to any subscriber by their MAX ID
+- **View active webhook subscriptions**
 
-The whole stack — Next.js admin panel **and** FastAPI backend — deploys as
-**one Vercel project** from the **repository root**.
+---
 
-#### How the build works
+## Cron Jobs
 
-| Phase | Command | What it does |
+| Endpoint | Schedule | Tasks |
 |---|---|---|
-| Install | `python3 -m pip install -r api/requirements.txt && cd frontend && npm install` | Installs Python deps + Node deps |
-| Build | `(cd backend && python3 -m prisma generate) && (cd frontend && npm run build)` | Downloads Prisma query engine binary + builds Next.js |
-| Function | `api/index.py` (Python 3.12 serverless) | FastAPI app serving all `/api/*` routes |
-| Frontend | `frontend/.next` | Next.js admin panel served from CDN |
-
-#### Step-by-step
-
-1. **Import the repo root** (not `frontend/` or `backend/`) as a new Vercel project.
-   - Framework Preset: **Other** (or Vercel auto-detects from `vercel.json`)
-   - Root Directory: leave as `/` (repo root)
-
-2. **Connect Supabase** via the Vercel Integrations dashboard.  The integration
-   automatically injects `rezaryad_POSTGRES_PRISMA_URL` (pooled, for runtime queries)
-   and `rezaryad_POSTGRES_URL_NON_POOLING` (direct, for schema migrations). The
-   backend's `config.py` maps these to `DATABASE_URL` and `DIRECT_DATABASE_URL`
-   automatically — **you do not need to set these manually**.
-
-3. **Set Environment Variables** in Vercel project settings → Environment Variables:
-
-   | Variable | Required | Description |
-   |---|---|---|
-   | `ADMIN_PASSWORD` | ✅ | Password for the built-in `admin` account (min 8 chars) |
-   | `MAX_BOT_TOKEN` | ✅ | Bot token from the [Max developer portal](https://dev.max.ru) |
-   | `SECRET_KEY` | ⬜ | Random ≥32-char string for JWT signing. Falls back to `rezaryad_SUPABASE_JWT_SECRET` (Supabase integration). |
-   | `CRON_SECRET` | ⬜ | Secret for Vercel Cron auth. Vercel sends `Authorization: Bearer <CRON_SECRET>` on every cron request. |
-   | `CORS_ORIGINS` | ⬜ | Leave **empty** — frontend and backend share one domain, no CORS needed. |
-   | `NEXT_PUBLIC_API_URL` | ❌ | Do **not** set. Frontend uses relative `/api/*` paths; `vercel.json` routes them to the Python function on the same domain. |
-
-4. **Deploy.** On every build Vercel:
-   - Installs Python deps from `api/requirements.txt`
-   - Runs `prisma generate` (downloads the Prisma PostgreSQL engine binary for Linux)
-   - Builds the Next.js frontend; output goes to `frontend/.next/`
-   - Packages `backend/**` source into the Lambda bundle (via `includeFiles`)
-   - On first Lambda cold-start: `apply_schema()` runs `prisma db push` to create DB tables,
-     then `seed_admin()` creates the `admin` user from `ADMIN_PASSWORD`
-
-5. **Cron Job** — Vercel calls this endpoint once per day (replaces APScheduler,
-   which can't run in a stateless serverless environment):
-
-   | Endpoint | Schedule | Tasks |
-   |---|---|---|
-   | `/api/admin/cron/run-all` | daily at midnight UTC | Expire bookings · open-door reminders · double-rental reminders · anomaly alerts |
-
-   This single daily cron fits within the **Vercel Hobby (free) plan** limit of 1 cron job
-   with a minimum interval of once per day.
-
-   The individual task endpoints (`/api/admin/cron/expire-bookings`, etc.) remain
-   available for manual triggering or for use with an **external scheduler** (e.g.
-   GitHub Actions scheduled workflow, cron-job.org) if more frequent execution is needed.
-
-The admin panel URL (e.g., `https://rezaryad.vercel.app/login`) is what operators
-open in a browser.  The same domain is used as the **Mini App URL** in Max.
-
-> **Note on Lambda size:** The Prisma query engine binary is ~40 MB. Combined with
-> other Python packages the Lambda may approach Vercel's 50 MB Hobby-plan limit.
-> If the build fails with a size error, upgrade to the Pro plan (250 MB limit) or
-> contact support to increase the limit.
-
----
-
-### Alternative: Separate backend + Vercel frontend
-
-If you prefer to host the Python backend on a VPS, Railway, or Render:
-
-- Deploy the `backend/` directory and set all env vars from `backend/.env.example`.
-- Run: `uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- In Vercel, import only the `frontend/` directory and set  
-  `NEXT_PUBLIC_API_URL=https://your-backend-domain.com` in the Vercel project.
+| `/api/admin/cron/run-all` | Daily at midnight UTC | Expire bookings · open-door reminders · anomaly alerts |
 
 ---
 
@@ -248,13 +165,7 @@ If you prefer to host the Python backend on a VPS, Railway, or Render:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Admin login returns 401 | Wrong password, or `ADMIN_PASSWORD` not set | Set `ADMIN_PASSWORD` in Vercel env and redeploy |
-| Admin login returns 422 | Old frontend sending `username` instead of `login` | Pull latest frontend code |
-| Bot does not respond | Webhook not registered, or wrong `MAX_BOT_TOKEN` | Re-register webhook (step 7) |
-| Mini-app auth returns 401 "Invalid initData signature" | `MAX_BOT_TOKEN` mismatch | Ensure backend uses the same token as the registered bot |
-| `DATABASE_URL` errors | DB not running or wrong credentials | On Vercel: verify the Supabase integration is connected; check `rezaryad_POSTGRES_PRISMA_URL` is injected |
-| Vercel build fails — `prisma generate` error | Missing `api/requirements.txt` or schema error | Check `backend/prisma/schema.prisma` parses cleanly; verify `api/requirements.txt` lists `prisma==0.13.1` |
-| Vercel build fails — Lambda too large | Prisma binary + packages exceed the plan limit | Upgrade to Vercel Pro (250 MB Lambda limit) |
-| API calls return 404 on Vercel | `NEXT_PUBLIC_API_URL` set to a wrong URL | Remove `NEXT_PUBLIC_API_URL` from Vercel env — the frontend uses relative paths by default |
-| Cron job not running | Cron not configured, `CRON_SECRET` mismatch, or plan limitation | Verify `vercel.json` has the `crons` entry; check `CRON_SECRET` matches what Vercel sends; Hobby plan allows 1 daily cron |
-| `apply_schema` times out on cold start | Lambda timeout too short for `prisma db push` | Increase `maxDuration` in `vercel.json` (requires Vercel Pro; Hobby plan caps at 10 s) |
+| Admin login returns 401 | Wrong password | Set `ADMIN_LOGIN` and `ADMIN_PASSWORD` in Vercel env and redeploy |
+| Bot does not respond | Webhook not registered or wrong token | Re-register webhook in Settings |
+| Mini-app returns 401 | `MAX_BOT_TOKEN` mismatch | Ensure the same token is used in both the bot and mini-app |
+| Courier registration not appearing | DB migration not applied | Re-run `supabase/schema.sql` in Supabase SQL editor |

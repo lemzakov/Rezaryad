@@ -40,7 +40,9 @@ export interface Courier {
   id: number;
   max_id: string;
   phone: string;
+  name: string | null;
   is_verified: boolean;
+  registration_status: 'PENDING_REGISTRATION' | 'ACTIVE';
   has_debt: boolean;
   debt_amount: number;
   active_sessions: number;
@@ -124,6 +126,32 @@ export interface CourierStatSummary {
   courier_phone: string;
   total_spent: number;
   session_count: number;
+}
+
+export interface MaxSubscriberInfo {
+  id: string;
+  max_id: string;
+  name: string | null;
+  phone: string | null;
+  language: string;
+  is_verified: boolean;
+  registration_status: string;
+  created_at: string;
+}
+
+export interface MaxMessage {
+  id: string;
+  user_id: string | null;
+  max_id: string;
+  direction: 'IN' | 'OUT';
+  text: string;
+  created_at: string;
+}
+
+export interface MaxDebugData {
+  subscribers: MaxSubscriberInfo[];
+  messages: MaxMessage[];
+  subscriptions: unknown;
 }
 
 export interface SessionsParams {
@@ -225,4 +253,18 @@ export const api = {
 
   getWebhookStatus: () =>
     apiFetch<{ success: boolean; subscriptions: unknown }>('/api/admin/settings/webhook'),
+
+  getMaxDebugData: () =>
+    apiFetch<MaxDebugData>('/api/admin/max/subscribers'),
+
+  sendMaxMessage: (maxId: string, text: string) =>
+    apiFetch<{ success: boolean; maxResponse: unknown }>('/api/admin/max/send', {
+      method: 'POST',
+      body: JSON.stringify({ maxId, text }),
+    }),
+
+  approveCourier: (id: number | string) =>
+    apiFetch<{ success: boolean; message: string }>(`/api/admin/couriers/${id}/approve`, {
+      method: 'POST',
+    }),
 };
