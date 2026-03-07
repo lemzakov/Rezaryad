@@ -5,6 +5,9 @@ import { api } from '@/lib/api';
 import { setToken, isAuthenticated } from '@/lib/auth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+// Pre-fill credentials for the quick-admin button (set in .env.local for dev)
+const ADMIN_LOGIN_PREFILL = process.env.NEXT_PUBLIC_ADMIN_LOGIN || '';
+const ADMIN_PASSWORD_PREFILL = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || '';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -49,8 +52,8 @@ export default function LoginPage() {
   }
 
   function handleAdminLogin() {
-    setLogin('admin');
-    setPassword(process.env.NEXT_PUBLIC_DEV_ADMIN_PASSWORD || 'admin');
+    setLogin(ADMIN_LOGIN_PREFILL || 'admin');
+    setPassword(ADMIN_PASSWORD_PREFILL);
     addLog('Admin quick-fill applied – press "Войти" to submit');
   }
 
@@ -98,6 +101,7 @@ export default function LoginPage() {
           >
             {loading ? 'Вход...' : 'Войти'}
           </button>
+          {ADMIN_LOGIN_PREFILL && ADMIN_PASSWORD_PREFILL && (
           <button
             type="button"
             onClick={handleAdminLogin}
@@ -105,6 +109,7 @@ export default function LoginPage() {
           >
             ⚡ Admin Login (тест)
           </button>
+          )}
         </form>
         <div className="mt-4">
           <button
