@@ -43,18 +43,22 @@ const adminLogin = process.env.ADMIN_LOGIN || '';
 const adminPassword = process.env.ADMIN_PASSWORD || '';
 
 if (!supabaseUrl || !serviceRoleKey) {
-  console.error(
-    '✗ NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set.\n' +
-      '  Copy .env.example to .env.local and fill in your Supabase credentials.',
+  // Soft-fail: during Vercel build the DB may not be available yet (env not injected).
+  // We warn and exit cleanly so the build is not blocked.
+  console.warn(
+    '[create-admin] ⚠ Skipped: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set.\n' +
+      '  Set these in Vercel → Settings → Environment Variables to auto-create the admin on deploy.',
   );
-  process.exit(1);
+  process.exit(0);
 }
 if (!adminLogin || !adminPassword) {
-  console.error(
-    '✗ ADMIN_LOGIN and ADMIN_PASSWORD must be set.\n' +
-      '  Example: ADMIN_LOGIN=admin ADMIN_PASSWORD=secret node scripts/create-admin.mjs',
+  // Soft-fail: ADMIN_LOGIN/ADMIN_PASSWORD are optional at build time.
+  console.warn(
+    '[create-admin] ⚠ Skipped: ADMIN_LOGIN or ADMIN_PASSWORD is not set.\n' +
+      '  Set these in Vercel → Settings → Environment Variables to auto-create the admin on deploy.\n' +
+      '  Or run manually: ADMIN_LOGIN=admin ADMIN_PASSWORD=secret node scripts/create-admin.mjs',
   );
-  process.exit(1);
+  process.exit(0);
 }
 if (adminPassword.length < 8) {
   console.error('✗ ADMIN_PASSWORD must be at least 8 characters.');
