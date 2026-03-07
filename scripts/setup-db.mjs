@@ -8,13 +8,15 @@
  *
  * Connection is resolved from these env vars (priority order):
  *
- *   1. Individual component vars (preferred — avoids SSL URL-parsing issues):
+ *   1. URL vars (preferred — uses IPv4-accessible pooler hostnames):
+ *      rezaryad_POSTGRES_URL_NON_POOLING → rezaryad_POSTGRES_URL → DATABASE_URL
+ *      uselibpqcompat=true is appended so sslmode=require uses libpq semantics
+ *      (encrypt-only, no certificate chain verification) for Supabase compatibility.
+ *
+ *   2. Individual component vars (last resort — rezaryad_POSTGRES_HOST may resolve
+ *      to an IPv6 address unreachable from Vercel build environments):
  *      rezaryad_POSTGRES_HOST, rezaryad_POSTGRES_USER,
  *      rezaryad_POSTGRES_PASSWORD, rezaryad_POSTGRES_DATABASE
- *
- *   2. URL fallbacks (stripped of sslmode query param to prevent pg from
- *      overriding our ssl: {rejectUnauthorized: false} setting):
- *      rezaryad_POSTGRES_URL_NON_POOLING → rezaryad_POSTGRES_URL → DATABASE_URL
  *
  * All vars are set automatically by the Vercel ↔ Supabase integration.
  *
@@ -48,39 +50,46 @@ try {
 }
 
 // ── Resolve connection config ──────────────────────────────────────────────
-// Prefer individual component vars — they let us pass ssl options without
-// the URL's sslmode query param fighting with pg's ssl object.
-const host = process.env.rezaryad_POSTGRES_HOST || '';
-const user = process.env.rezaryad_POSTGRES_USER || '';
-const password = process.env.rezaryad_POSTGRES_PASSWORD || '';
-const database = process.env.rezaryad_POSTGRES_DATABASE || '';
-
-/** Strip ?sslmode=... from a connection URL so pg doesn't override our ssl config. */
-function stripSslMode(url) {
-  try {
-    const u = new URL(url);
-    u.searchParams.delete('sslmode');
-    u.searchParams.delete('pgbouncer');
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-
+// Prefer URL vars: their hostnames (aws-1-us-east-1.pooler.supabase.com) are
+// IPv4-accessible from Vercel build environments, while rezaryad_POSTGRES_HOST
+// (db.<ref>.supabase.co) may resolve to an IPv6 address that is unreachable.
 const databaseUrl =
   process.env.rezaryad_POSTGRES_URL_NON_POOLING ||
   process.env.rezaryad_POSTGRES_URL ||
   process.env.DATABASE_URL ||
   '';
 
-const hasComponents = host && user && database;
-const hasUrl = Boolean(databaseUrl);
+// Individual component vars as last resort (may fail if host is IPv6-only).
+const host = process.env.rezaryad_POSTGRES_HOST || '';
+const user = process.env.rezaryad_POSTGRES_USER || '';
+const password = process.env.rezaryad_POSTGRES_PASSWORD || '';
+const database = process.env.rezaryad_POSTGRES_DATABASE || '';
 
-if (!hasComponents && !hasUrl) {
+const hasUrl = Boolean(databaseUrl);
+const hasComponents = Boolean(host && user && database);
+
+/**
+ * Prepare a PostgreSQL connection URL for the pg library:
+ * - Remove pgbouncer flag (not a pg option)
+ * - Add uselibpqcompat=true so sslmode=require uses libpq semantics
+ *   (encrypt-only, no cert chain verification) — required for Supabase
+ */
+function prepareUrl(url) {
+  try {
+    const u = new URL(url);
+    u.searchParams.delete('pgbouncer');
+    u.searchParams.set('uselibpqcompat', 'true');
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+if (!hasUrl && !hasComponents) {
   console.warn(
     '[setup-db] ⚠ Skipped: no PostgreSQL connection found.\n' +
-      '  Expected rezaryad_POSTGRES_HOST/USER/PASSWORD/DATABASE or\n' +
-      '  rezaryad_POSTGRES_URL_NON_POOLING / rezaryad_POSTGRES_URL / DATABASE_URL.\n' +
+      '  Expected rezaryad_POSTGRES_URL_NON_POOLING / rezaryad_POSTGRES_URL / DATABASE_URL\n' +
+      '  or rezaryad_POSTGRES_HOST/USER/PASSWORD/DATABASE.\n' +
       '  These are set automatically when you connect a Supabase integration in Vercel.',
   );
   process.exit(0);
@@ -89,9 +98,9 @@ if (!hasComponents && !hasUrl) {
 // ── Connect ────────────────────────────────────────────────────────────────
 const { Client } = require('pg');
 
-const clientConfig = hasComponents
-  ? { host, user, password, database, port: 5432, ssl: { rejectUnauthorized: false } }
-  : { connectionString: stripSslMode(databaseUrl), ssl: { rejectUnauthorized: false } };
+const clientConfig = hasUrl
+  ? { connectionString: prepareUrl(databaseUrl) }
+  : { host, user, password, database, port: 5432, ssl: { rejectUnauthorized: false } };
 
 const client = new Client(clientConfig);
 
