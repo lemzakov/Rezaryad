@@ -209,17 +209,19 @@ The whole stack — Next.js admin panel **and** FastAPI backend — deploys as
    - On first Lambda cold-start: `apply_schema()` runs `prisma db push` to create DB tables,
      then `seed_admin()` creates the `admin` user from `ADMIN_PASSWORD`
 
-5. **Cron Jobs** — Vercel calls these endpoints on schedule (replaces APScheduler,
+5. **Cron Job** — Vercel calls this endpoint once per day (replaces APScheduler,
    which can't run in a stateless serverless environment):
 
-   | Endpoint | Schedule | Task |
+   | Endpoint | Schedule | Tasks |
    |---|---|---|
-   | `/api/admin/cron/expire-bookings` | every 5 min | Expire past-due bookings |
-   | `/api/admin/cron/check-open-doors` | every 10 min | Remind users with door open > 10 min |
-   | `/api/admin/cron/check-double-rentals` | every 5 min | Remind couriers with 2+ active sessions |
-   | `/api/admin/cron/check-anomalies` | every 10 min | Alert admin about sessions > 2 hours |
+   | `/api/admin/cron/run-all` | daily at midnight UTC | Expire bookings · open-door reminders · double-rental reminders · anomaly alerts |
 
-   Cron Jobs require **Vercel Hobby plan or above**.
+   This single daily cron fits within the **Vercel Hobby (free) plan** limit of 1 cron job
+   with a minimum interval of once per day.
+
+   The individual task endpoints (`/api/admin/cron/expire-bookings`, etc.) remain
+   available for manual triggering or for use with an **external scheduler** (e.g.
+   GitHub Actions scheduled workflow, cron-job.org) if more frequent execution is needed.
 
 The admin panel URL (e.g., `https://rezaryad.vercel.app/login`) is what operators
 open in a browser.  The same domain is used as the **Mini App URL** in Max.
@@ -254,5 +256,5 @@ If you prefer to host the Python backend on a VPS, Railway, or Render:
 | Vercel build fails — `prisma generate` error | Missing `api/requirements.txt` or schema error | Check `backend/prisma/schema.prisma` parses cleanly; verify `api/requirements.txt` lists `prisma==0.13.1` |
 | Vercel build fails — Lambda too large | Prisma binary + packages exceed the plan limit | Upgrade to Vercel Pro (250 MB Lambda limit) |
 | API calls return 404 on Vercel | `NEXT_PUBLIC_API_URL` set to a wrong URL | Remove `NEXT_PUBLIC_API_URL` from Vercel env — the frontend uses relative paths by default |
-| Cron jobs not running | Plan doesn't support Cron, or `CRON_SECRET` mismatch | Verify Vercel plan supports Cron Jobs; check `CRON_SECRET` matches what Vercel sends |
-| `apply_schema` times out on cold start | Lambda timeout too short for `prisma db push` | `maxDuration: 60` is set in `vercel.json`; requires Vercel Pro |
+| Cron job not running | Cron not configured, `CRON_SECRET` mismatch, or plan limitation | Verify `vercel.json` has the `crons` entry; check `CRON_SECRET` matches what Vercel sends; Hobby plan allows 1 daily cron |
+| `apply_schema` times out on cold start | Lambda timeout too short for `prisma db push` | Increase `maxDuration` in `vercel.json` (requires Vercel Pro; Hobby plan caps at 10 s) |

@@ -1,38 +1,13 @@
 {
   "version": 2,
   "framework": "nextjs",
-  "installCommand": "python3 -m pip install -r api/requirements.txt && cd frontend && npm install",
-  "buildCommand": "(cd backend && python3 -m prisma generate) && (cd frontend && npm run build)",
-  "outputDirectory": "frontend/.next",
-  "functions": {
-    "api/index.py": {
-      "runtime": "python3.12",
-      "maxDuration": 60,
-      "includeFiles": "backend/**"
-    }
-  },
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "/api/index.py"
-    }
-  ],
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install",
   "crons": [
     {
-      "path": "/api/admin/cron/expire-bookings",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/admin/cron/check-open-doors",
-      "schedule": "*/10 * * * *"
-    },
-    {
-      "path": "/api/admin/cron/check-double-rentals",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/admin/cron/check-anomalies",
-      "schedule": "*/10 * * * *"
+      "path": "/api/admin/cron/run-all",
+      "schedule": "0 0 * * *"
     }
   ]
 }
