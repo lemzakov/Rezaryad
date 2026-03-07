@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     cells: { number: number; locker_id: string; lockers: { name: string } | null } | null;
   };
 
-  const recent_anomalies = (longSessions as unknown as SessionRow[] ?? []).map((s: SessionRow, idx: number) => ({
+  const recent_anomalies = ((longSessions ?? []) as unknown as SessionRow[]).map((s, idx) => ({
     id: idx,
     type: 'LONG_SESSION' as const,
     session_id: s.id,

@@ -11,6 +11,14 @@ interface SessionRow {
   cells: { number: number; locker_id: string; lockers: { name: string } | null } | null;
 }
 
+interface BusyCell {
+  id: string;
+  number: number;
+  locker_id: string;
+  lockers: { name: string } | null;
+  updated_at: string;
+}
+
 export async function GET(req: NextRequest) {
   const { error } = await getAuthenticatedAdmin(req);
   if (error) return error;
@@ -36,15 +44,15 @@ export async function GET(req: NextRequest) {
     duration_minutes: Math.round((Date.now() - new Date(s.start_at).getTime()) / 60000),
   }));
 
-  // Open doors: cells with BUSY status but no active session
-  const { data: busyCells } = await supabase
+  const { data: busyCellsRaw } = await supabase
     .from('cells')
     .select('id, number, locker_id, lockers(name), updated_at')
     .eq('status', 'BUSY');
+  const busyCells = (busyCellsRaw ?? []) as unknown as BusyCell[];
 
   const openDoors = [];
   let odIdx = 0;
-  for (const cell of busyCells ?? []) {
+  for (const cell of busyCells) {
     const { count } = await supabase
       .from('sessions')
       .select('id', { count: 'exact', head: true })
@@ -55,10 +63,10 @@ export async function GET(req: NextRequest) {
         id: odIdx++,
         type: 'OPEN_DOOR',
         locker_id: cell.locker_id,
-        locker_name: (cell as unknown as { lockers: { name: string } | null }).lockers?.name ?? '—',
+        locker_name: cell.lockers?.name ?? '—',
         cell_id: cell.id,
         cell_number: cell.number,
-        since: (cell as unknown as { updated_at: string }).updated_at ?? null,
+        since: cell.updated_at ?? null,
       });
     }
   }
@@ -84,6 +92,3 @@ export async function GET(req: NextRequest) {
     debtors: debtorList,
   });
 }
-
-
-

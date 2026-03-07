@@ -183,7 +183,7 @@ export default function SettingsPage() {
               onClick={() => {
                 setWebhookLoading(true);
                 api.getWebhookStatus()
-                  .then(s => { setWebhookStatus(s); })
+                  .then(s => setWebhookStatus(s))
                   .catch(() => setWebhookStatus(null))
                   .finally(() => setWebhookLoading(false));
               }}
