@@ -66,7 +66,7 @@ const password = process.env.rezaryad_POSTGRES_PASSWORD || '';
 const database = process.env.rezaryad_POSTGRES_DATABASE || '';
 
 const hasUrl = Boolean(databaseUrl);
-const hasComponents = Boolean(host && user && database);
+const hasComponents = Boolean(host && user && password && database);
 
 /**
  * Prepare a PostgreSQL connection URL for the pg library:
