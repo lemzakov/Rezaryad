@@ -9,18 +9,22 @@ import type { DbUser } from '@/lib/types';
 
 type LogCtx = { userId: string; maxId: string };
 
-async function sendMessage(chatId: string, text: string, keyboard?: unknown, logCtx?: LogCtx): Promise<void> {
+async function sendMessage(maxUserId: string, text: string, keyboard?: unknown, logCtx?: LogCtx): Promise<void> {
   const payload: Record<string, unknown> = { text };
   if (keyboard) {
     payload.attachments = [keyboard];
   }
   try {
-    await fetch(`${MAX_API_BASE}/messages?chat_id=${encodeURIComponent(chatId)}`, {
+    const res = await fetch(`${MAX_API_BASE}/messages?user_id=${encodeURIComponent(maxUserId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: MAX_BOT_TOKEN },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000),
     });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      console.error('sendMessage API error:', res.status, JSON.stringify(errBody), { maxUserId, text: text.slice(0, 100) });
+    }
     if (logCtx) {
       void supabase.from('max_messages').insert({
         user_id: logCtx.userId,
@@ -30,7 +34,7 @@ async function sendMessage(chatId: string, text: string, keyboard?: unknown, log
       });
     }
   } catch (e) {
-    console.error('sendMessage error:', e instanceof Error ? e.message : String(e));
+    console.error('sendMessage error:', e instanceof Error ? e.message : String(e), { maxUserId });
   }
 }
 
@@ -156,22 +160,20 @@ async function getOrCreateUser(maxId: string): Promise<DbUser> {
 }
 
 async function handleBotStarted(update: Record<string, unknown>) {
-  const chatId = String(update.chat_id || '');
   const userObj = (update.user || {}) as Record<string, unknown>;
   const maxId = String(userObj.user_id || '');
-  if (!maxId || !chatId) return;
+  if (!maxId) return;
 
   const user = await getOrCreateUser(maxId);
   const lang = user.language;
   const log: LogCtx = { userId: user.id, maxId };
-  await sendMessage(chatId, getMsg('welcome', lang, { maxId }), langKb(), log);
+  await sendMessage(maxId, getMsg('welcome', lang, { maxId }), langKb(), log);
 }
 
 async function handleMessage(update: Record<string, unknown>) {
   const msg = (update.message || {}) as Record<string, unknown>;
   const sender = (msg.sender || {}) as Record<string, unknown>;
   const maxId = String(sender.user_id || '');
-  const chatId = String(((msg.recipient || {}) as Record<string, unknown>).chat_id || maxId);
   const body = (msg.body || {}) as Record<string, unknown>;
   const text = String(body.text || '').trim();
   if (!maxId) return;
@@ -193,18 +195,18 @@ async function handleMessage(update: Record<string, unknown>) {
   // Handle onboarding conversation states
   if (user.bot_state === 'ONBOARDING_NAME') {
     if (text.trim().length < 2) {
-      await sendMessage(chatId, getMsg('onboarding_name_too_short', lang), undefined, log);
+      await sendMessage(maxId, getMsg('onboarding_name_too_short', lang), undefined, log);
       return;
     }
     await supabase.from('users').update({ name: text.trim(), bot_state: 'ONBOARDING_PHONE' }).eq('id', user.id);
-    await sendMessage(chatId, getMsg('onboarding_ask_phone', lang), undefined, log);
+    await sendMessage(maxId, getMsg('onboarding_ask_phone', lang), undefined, log);
     return;
   }
 
   if (user.bot_state === 'ONBOARDING_PHONE') {
     const phoneRegex = /^\+\d{7,15}$/;
     if (!phoneRegex.test(text.trim())) {
-      await sendMessage(chatId, getMsg('onboarding_phone_invalid', lang), undefined, log);
+      await sendMessage(maxId, getMsg('onboarding_phone_invalid', lang), undefined, log);
       return;
     }
     await supabase.from('users').update({
@@ -212,20 +214,20 @@ async function handleMessage(update: Record<string, unknown>) {
       bot_state: null,
       registration_status: 'PENDING_REGISTRATION',
     }).eq('id', user.id);
-    await sendMessage(chatId, getMsg('onboarding_done', lang), mainMenuKb(lang, false), log);
+    await sendMessage(maxId, getMsg('onboarding_done', lang), mainMenuKb(lang, false), log);
     return;
   }
   if (text.toLowerCase() === '/start' || text.toLowerCase() === 'start') {
     const isRegistered = isCourierRegistered(user);
-    await sendMessage(chatId, getMsg('welcome', lang, { maxId }), langKb(), log);
+    await sendMessage(maxId, getMsg('welcome', lang, { maxId }), langKb(), log);
     if (!isRegistered) {
-      await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, false), log);
+      await sendMessage(maxId, getMsg('main_menu', lang), mainMenuKb(lang, false), log);
     }
     return;
   }
   if (text.toLowerCase() === '/menu') {
     const isRegistered = isCourierRegistered(user);
-    await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
+    await sendMessage(maxId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
     return;
   }
   if (text.length > 6 && !text.startsWith('/')) {
@@ -244,16 +246,16 @@ async function handleMessage(update: Record<string, unknown>) {
       const currency = (({ RU: 'руб/мин', UZ: "so'm/daq", TJ: 'сомонӣ/дақ' }) as Record<string, string>)[lang] || 'руб/мин';
       const tariffLines = (tariffs ?? []).map((t) => `  • ${t.name}: ${t.price_per_minute} ${currency}`).join('\n');
       if (freeCells.length === 0) {
-        await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, locker.id), log);
+        await sendMessage(maxId, getMsg('no_free_cells', lang), queueJoinKb(lang, locker.id), log);
       } else {
         const infoText = `🔋 Шкафчик: ${locker.name}\n📍 Адрес: ${locker.address}\n🟢 Свободных ячеек: ${freeCells.length}\n\n💰 Тарифы:\n${tariffLines || '—'}`;
-        await sendMessage(chatId, infoText, lockerKb(lang, locker.id, true), log);
+        await sendMessage(maxId, infoText, lockerKb(lang, locker.id, true), log);
       }
       return;
     }
   }
   const isRegistered = isCourierRegistered(user);
-  await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
+  await sendMessage(maxId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
 }
 
 async function handleCallback(update: Record<string, unknown>) {
@@ -262,9 +264,6 @@ async function handleCallback(update: Record<string, unknown>) {
   const payload = String(cb.payload || '');
   const sender = (cb.user || {}) as Record<string, unknown>;
   const maxId = String(sender.user_id || '');
-  const chatId = String(
-    ((cb.message as Record<string, unknown>)?.recipient as Record<string, unknown>)?.chat_id || maxId,
-  );
 
   if (!maxId) return;
   const user = await getOrCreateUser(maxId);
@@ -279,40 +278,40 @@ async function handleCallback(update: Record<string, unknown>) {
         await supabase.from('users').update({ language: newLang }).eq('id', user.id);
         const isRegistered = isCourierRegistered(user);
         await answerCallback(callbackId, getMsg('main_menu', newLang));
-        await sendMessage(chatId, getMsg('main_menu', newLang), mainMenuKb(newLang, isRegistered), log);
+        await sendMessage(maxId, getMsg('main_menu', newLang), mainMenuKb(newLang, isRegistered), log);
       }
     } else if (parts[0] === 'register') {
       if (parts[1] === 'start') {
         if (user.is_verified) {
           await answerCallback(callbackId, getMsg('already_registered', lang));
-          await sendMessage(chatId, getMsg('already_registered', lang), undefined, log);
+          await sendMessage(maxId, getMsg('already_registered', lang), undefined, log);
           return;
         }
         if (user.registration_status === 'PENDING_REGISTRATION' && !user.bot_state) {
           await answerCallback(callbackId, getMsg('pending_registration', lang));
-          await sendMessage(chatId, getMsg('pending_registration', lang), mainMenuKb(lang, true), log);
+          await sendMessage(maxId, getMsg('pending_registration', lang), mainMenuKb(lang, true), log);
           return;
         }
         await supabase.from('users').update({ bot_state: 'ONBOARDING_NAME' }).eq('id', user.id);
         await answerCallback(callbackId, '📝');
-        await sendMessage(chatId, getMsg('onboarding_ask_name', lang), undefined, log);
+        await sendMessage(maxId, getMsg('onboarding_ask_name', lang), undefined, log);
       }
     } else if (parts[0] === 'menu') {
       const action = parts[1];
       const isRegistered = isCourierRegistered(user);
-      if (action === 'main') await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
-      else if (action === 'scan_qr') await sendMessage(chatId, getMsg('scan_qr', lang), undefined, log);
+      if (action === 'main') await sendMessage(maxId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
+      else if (action === 'scan_qr') await sendMessage(maxId, getMsg('scan_qr', lang), undefined, log);
       else if (action === 'map') {
         const { data: lockers } = await supabase.from('lockers').select('name, address').eq('is_active', true);
         const lines = (lockers ?? []).map((l) => `📍 ${l.name} — ${l.address}`).join('\n');
-        await sendMessage(chatId, lines ? `🗺 Шкафчики:\n${lines}` : 'Нет активных шкафчиков', undefined, log);
+        await sendMessage(maxId, lines ? `🗺 Шкафчики:\n${lines}` : 'Нет активных шкафчиков', undefined, log);
       } else if (action === 'cabinet') {
         const [{ count: totalSessions }, { count: activeSessions }] = await Promise.all([
           supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
           supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('user_id', user.id).is('end_at', null),
         ]);
         const cabinetText = `👤 Личный кабинет\n\n📊 Статистика:\n💳 Долг: ${Number(user.debt_amount).toFixed(2)}\n✅ Сессий всего: ${totalSessions ?? 0}\n🔋 Активных аренд: ${activeSessions ?? 0}`;
-        await sendMessage(chatId, cabinetText, cabinetKb(lang), log);
+        await sendMessage(maxId, cabinetText, cabinetKb(lang), log);
       }
     } else if (parts[0] === 'cabinet') {
       const action = parts[1];
@@ -329,8 +328,8 @@ async function handleCallback(update: Record<string, unknown>) {
             const cost = s.cost != null ? Number(s.cost).toFixed(2) : '0.00';
             return `📅 ${new Date(s.start_at).toLocaleDateString()} | ⏱${dur}мин | 💰${cost}`;
           });
-          await sendMessage(chatId, '📋 Ваши сессии:\n' + lines.join('\n'), undefined, log);
-        } else await sendMessage(chatId, 'Нет сессий', undefined, log);
+          await sendMessage(maxId, '📋 Ваши сессии:\n' + lines.join('\n'), undefined, log);
+        } else await sendMessage(maxId, 'Нет сессий', undefined, log);
       } else if (action === 'cards') {
         const { data: cards } = await supabase
           .from('payment_cards')
@@ -338,8 +337,8 @@ async function handleCallback(update: Record<string, unknown>) {
           .eq('user_id', user.id)
           .eq('is_active', true);
         if (cards && cards.length > 0)
-          await sendMessage(chatId, 'Ваши карты:\n' + cards.map((c) => `💳 **** ${c.last_four}`).join('\n'), undefined, log);
-        else await sendMessage(chatId, 'Карты не привязаны', undefined, log);
+          await sendMessage(maxId, 'Ваши карты:\n' + cards.map((c) => `💳 **** ${c.last_four}`).join('\n'), undefined, log);
+        else await sendMessage(maxId, 'Карты не привязаны', undefined, log);
       } else if (action === 'subscription') {
         const { data: sub } = await supabase
           .from('subscriptions')
@@ -347,30 +346,30 @@ async function handleCallback(update: Record<string, unknown>) {
           .eq('user_id', user.id)
           .eq('is_active', true)
           .maybeSingle();
-        if (sub) await sendMessage(chatId, `✅ Подписка активна до ${new Date(sub.end_at).toLocaleDateString()}`, undefined, log);
-        else await sendMessage(chatId, '❌ Нет активной подписки', undefined, log);
+        if (sub) await sendMessage(maxId, `✅ Подписка активна до ${new Date(sub.end_at).toLocaleDateString()}`, undefined, log);
+        else await sendMessage(maxId, '❌ Нет активной подписки', undefined, log);
       }
     } else if (parts[0] === 'book' && parts[1] === 'locker') {
       const lockerId = parts[2];
       if (user.has_debt) {
-        await sendMessage(chatId, getMsg('has_debt', lang, { amount: Number(user.debt_amount).toFixed(2) }), debtKb(lang), log);
+        await sendMessage(maxId, getMsg('has_debt', lang, { amount: Number(user.debt_amount).toFixed(2) }), debtKb(lang), log);
         return;
       }
-      if (!user.is_verified) { await sendMessage(chatId, getMsg('not_verified', lang), undefined, log); return; }
+      if (!user.is_verified) { await sendMessage(maxId, getMsg('not_verified', lang), undefined, log); return; }
       const [{ count: activeBookings }, { count: activeSessions }] = await Promise.all([
         supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'ACTIVE'),
         supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('user_id', user.id).is('end_at', null),
       ]);
-      if ((activeBookings ?? 0) >= 1) { await sendMessage(chatId, getMsg('max_bookings', lang), undefined, log); return; }
-      if ((activeSessions ?? 0) >= 2) { await sendMessage(chatId, getMsg('max_sessions', lang), undefined, log); return; }
+      if ((activeBookings ?? 0) >= 1) { await sendMessage(maxId, getMsg('max_bookings', lang), undefined, log); return; }
+      if ((activeSessions ?? 0) >= 2) { await sendMessage(maxId, getMsg('max_sessions', lang), undefined, log); return; }
       const [{ data: cell }, { data: locker }, { data: sub }] = await Promise.all([
         supabase.from('cells').select('id, number').eq('locker_id', lockerId).eq('status', 'FREE').maybeSingle(),
         supabase.from('lockers').select('name').eq('id', lockerId).maybeSingle(),
         supabase.from('subscriptions').select('id').eq('user_id', user.id).eq('is_active', true).maybeSingle(),
       ]);
-      if (!cell) { await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId), log); return; }
+      if (!cell) { await sendMessage(maxId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId), log); return; }
       const freeMins = sub ? BOOKING_FREE_MINS_SUBSCRIBED : BOOKING_FREE_MINS;
-      await sendMessage(chatId, `📋 Подтвердить бронирование?\n🔋 Ячейка #${cell.number} в ${locker?.name || '—'}\n⏱ Бесплатно: ${freeMins} мин`, confirmBookingKb(lang, cell.id), log);
+      await sendMessage(maxId, `📋 Подтвердить бронирование?\n🔋 Ячейка #${cell.number} в ${locker?.name || '—'}\n⏱ Бесплатно: ${freeMins} мин`, confirmBookingKb(lang, cell.id), log);
     } else if (parts[0] === 'book' && parts[1] === 'confirm') {
       const cellId = parts[2];
       const svc = new BookingService(supabase);
@@ -383,15 +382,15 @@ async function handleCallback(update: Record<string, unknown>) {
           .maybeSingle();
         await answerCallback(callbackId, '✅');
         await sendMessage(
-          chatId,
+          maxId,
           `✅ Бронирование создано!\n⏰ Действует до: ${new Date(booking.ends_at).toLocaleTimeString()}\nЯчейка #${cell?.number || '?'}`,
           sessionKb(lang, 'pending'),
           log,
         );
-      } catch (e) { await sendMessage(chatId, String(e), undefined, log); }
+      } catch (e) { await sendMessage(maxId, String(e), undefined, log); }
     } else if (parts[0] === 'book' && parts[1] === 'cancel') {
       const isRegistered = isCourierRegistered(user);
-      await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
+      await sendMessage(maxId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
     } else if (parts[0] === 'session' && parts[1] === 'end') {
       const sessionId = parts[2];
       if (sessionId === 'pending') {
@@ -406,7 +405,7 @@ async function handleCallback(update: Record<string, unknown>) {
           const session = await svc.startSession(user.id, booking.cell_id, booking.id);
           await answerCallback(callbackId, `🔓 Сессия началась в ${new Date(session.start_at).toLocaleTimeString()}`);
           await sendMessage(
-            chatId,
+            maxId,
             `🔓 Ячейка открыта! Сессия началась.\n⏱ Начало: ${new Date(session.start_at).toLocaleTimeString()}`,
             sessionKb(lang, session.id),
             log,
@@ -419,30 +418,30 @@ async function handleCallback(update: Record<string, unknown>) {
         const ended = await svc.endSession(sessionId, true, true);
         await answerCallback(callbackId, '✅');
         await sendMessage(
-          chatId,
+          maxId,
           `✅ Сессия завершена!\n⏱ Длительность: ${Number(ended.duration_mins ?? 0).toFixed(1)} мин\n💰 Стоимость: ${Number(ended.cost ?? 0).toFixed(2)} руб`,
           undefined,
           log,
         );
-      } catch (e) { await sendMessage(chatId, String(e), undefined, log); }
+      } catch (e) { await sendMessage(maxId, String(e), undefined, log); }
     } else if (parts[0] === 'queue') {
       const action = parts[1];
       const lockerId = parts[2];
-      if (action === 'join') await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId), log);
+      if (action === 'join') await sendMessage(maxId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId), log);
       else if (action === 'confirm') {
         const svc = new QueueService(supabase);
         const entry = await svc.joinQueue(user.id, lockerId);
         await answerCallback(callbackId, '✅');
-        await sendMessage(chatId, getMsg('queue_joined', lang, { position: entry.position }), undefined, log);
+        await sendMessage(maxId, getMsg('queue_joined', lang, { position: entry.position }), undefined, log);
       }
     } else if (parts[0] === 'debt' && parts[1] === 'pay') {
       const svc = new PaymentService(supabase);
       const result = await svc.processDebt(user.id);
-      await sendMessage(chatId, result ? getMsg('debt_cleared', lang) : getMsg('error_generic', lang), undefined, log);
+      await sendMessage(maxId, result ? getMsg('debt_cleared', lang) : getMsg('error_generic', lang), undefined, log);
     }
   } catch (e) {
     console.error('Callback handler error:', e);
-    await sendMessage(chatId, getMsg('error_generic', lang), undefined, log);
+    await sendMessage(maxId, getMsg('error_generic', lang), undefined, log);
   }
 }
 
