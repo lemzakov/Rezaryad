@@ -38,7 +38,7 @@ export const ADMIN_PASSWORD: string = process.env.ADMIN_PASSWORD || '';
 export const ALGORITHM = 'HS256';
 export const ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7; // 7 days
 
-export const MAX_API_BASE = 'https://botapi.max.ru';
+export const MAX_API_BASE = 'https://platform-api.max.ru';
 
 export const BOOKING_FREE_MINS = 5;
 export const BOOKING_FREE_MINS_SUBSCRIBED = 10;

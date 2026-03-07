@@ -8,17 +8,14 @@ import { MAX_BOT_TOKEN, MAX_API_BASE, BOOKING_FREE_MINS, BOOKING_FREE_MINS_SUBSC
 import type { DbUser } from '@/lib/types';
 
 async function sendMessage(chatId: string, text: string, keyboard?: unknown): Promise<void> {
-  const payload: Record<string, unknown> = {
-    recipient: { chat_id: chatId },
-    body: { type: 'text', text },
-  };
+  const payload: Record<string, unknown> = { text };
   if (keyboard) {
-    (payload.body as Record<string, unknown>).attachments = [keyboard];
+    payload.attachments = [keyboard];
   }
   try {
-    await fetch(`${MAX_API_BASE}/messages?access_token=${MAX_BOT_TOKEN}`, {
+    await fetch(`${MAX_API_BASE}/messages?chat_id=${encodeURIComponent(chatId)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: MAX_BOT_TOKEN },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000),
     });
@@ -29,10 +26,10 @@ async function sendMessage(chatId: string, text: string, keyboard?: unknown): Pr
 
 async function answerCallback(callbackId: string, text: string): Promise<void> {
   try {
-    await fetch(`${MAX_API_BASE}/answers?access_token=${MAX_BOT_TOKEN}`, {
+    await fetch(`${MAX_API_BASE}/answers?callback_id=${encodeURIComponent(callbackId)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ callback_id: callbackId, message: { text } }),
+      headers: { 'Content-Type': 'application/json', Authorization: MAX_BOT_TOKEN },
+      body: JSON.stringify({ notification: text }),
       signal: AbortSignal.timeout(10000),
     });
   } catch (e) {
@@ -99,6 +96,17 @@ async function getOrCreateUser(maxId: string): Promise<DbUser> {
     .single<DbUser>();
   if (!created) throw new Error('Failed to create user');
   return created;
+}
+
+async function handleBotStarted(update: Record<string, unknown>) {
+  const chatId = String(update.chat_id || '');
+  const userObj = (update.user || {}) as Record<string, unknown>;
+  const maxId = String(userObj.user_id || '');
+  if (!maxId || !chatId) return;
+
+  const user = await getOrCreateUser(maxId);
+  const lang = user.language;
+  await sendMessage(chatId, getMsg('welcome', lang), langKb());
 }
 
 async function handleMessage(update: Record<string, unknown>) {
@@ -330,6 +338,7 @@ export async function POST(req: NextRequest) {
     const updateType = body.update_type || '';
     if (updateType === 'message_created') await handleMessage(body);
     else if (updateType === 'message_callback') await handleCallback(body);
+    else if (updateType === 'bot_started') await handleBotStarted(body);
   } catch (e) {
     console.error('Webhook handler error:', e);
   }

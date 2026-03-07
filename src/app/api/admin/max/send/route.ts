@@ -32,15 +32,12 @@ export async function POST(req: NextRequest) {
 
   // Send message via MAX API
   try {
-    const payload = {
-      recipient: { chat_id: maxId },
-      body: { type: 'text', text: trimmedText },
-    };
+    const payload = { text: trimmedText };
     const resp = await fetch(
-      `${MAX_API_BASE}/messages?access_token=${MAX_BOT_TOKEN}`,
+      `${MAX_API_BASE}/messages?chat_id=${encodeURIComponent(maxId)}`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: MAX_BOT_TOKEN },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(10000),
       },
