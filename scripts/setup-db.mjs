@@ -6,12 +6,17 @@
  * Safe to re-run: all DDL uses CREATE ... IF NOT EXISTS / DO ... END blocks.
  * Seed data uses ON CONFLICT DO NOTHING so duplicate rows are safe.
  *
- * Connection is read from these env vars (first one found wins):
- *   rezaryad_POSTGRES_URL_NON_POOLING  — direct Supabase connection (required for DDL)
- *   rezaryad_POSTGRES_URL              — pooler URL (fallback, DDL may fail with pgbouncer)
- *   DATABASE_URL                       — generic fallback
+ * Connection is resolved from these env vars (priority order):
  *
- * Both are set automatically by Vercel when you connect a Supabase integration.
+ *   1. Individual component vars (preferred — avoids SSL URL-parsing issues):
+ *      rezaryad_POSTGRES_HOST, rezaryad_POSTGRES_USER,
+ *      rezaryad_POSTGRES_PASSWORD, rezaryad_POSTGRES_DATABASE
+ *
+ *   2. URL fallbacks (stripped of sslmode query param to prevent pg from
+ *      overriding our ssl: {rejectUnauthorized: false} setting):
+ *      rezaryad_POSTGRES_URL_NON_POOLING → rezaryad_POSTGRES_URL → DATABASE_URL
+ *
+ * All vars are set automatically by the Vercel ↔ Supabase integration.
  *
  * Optional:
  *   SEED_DB=true  — force re-run of supabase/seed.sql even if schema already existed
@@ -42,16 +47,40 @@ try {
   // .env.local not present — that's fine
 }
 
+// ── Resolve connection config ──────────────────────────────────────────────
+// Prefer individual component vars — they let us pass ssl options without
+// the URL's sslmode query param fighting with pg's ssl object.
+const host = process.env.rezaryad_POSTGRES_HOST || '';
+const user = process.env.rezaryad_POSTGRES_USER || '';
+const password = process.env.rezaryad_POSTGRES_PASSWORD || '';
+const database = process.env.rezaryad_POSTGRES_DATABASE || '';
+
+/** Strip ?sslmode=... from a connection URL so pg doesn't override our ssl config. */
+function stripSslMode(url) {
+  try {
+    const u = new URL(url);
+    u.searchParams.delete('sslmode');
+    u.searchParams.delete('pgbouncer');
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 const databaseUrl =
   process.env.rezaryad_POSTGRES_URL_NON_POOLING ||
   process.env.rezaryad_POSTGRES_URL ||
   process.env.DATABASE_URL ||
   '';
 
-if (!databaseUrl) {
+const hasComponents = host && user && database;
+const hasUrl = Boolean(databaseUrl);
+
+if (!hasComponents && !hasUrl) {
   console.warn(
-    '[setup-db] ⚠ Skipped: no PostgreSQL connection string found.\n' +
-      '  Expected one of: rezaryad_POSTGRES_URL_NON_POOLING, rezaryad_POSTGRES_URL, DATABASE_URL\n' +
+    '[setup-db] ⚠ Skipped: no PostgreSQL connection found.\n' +
+      '  Expected rezaryad_POSTGRES_HOST/USER/PASSWORD/DATABASE or\n' +
+      '  rezaryad_POSTGRES_URL_NON_POOLING / rezaryad_POSTGRES_URL / DATABASE_URL.\n' +
       '  These are set automatically when you connect a Supabase integration in Vercel.',
   );
   process.exit(0);
@@ -59,7 +88,12 @@ if (!databaseUrl) {
 
 // ── Connect ────────────────────────────────────────────────────────────────
 const { Client } = require('pg');
-const client = new Client({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } });
+
+const clientConfig = hasComponents
+  ? { host, user, password, database, port: 5432, ssl: { rejectUnauthorized: false } }
+  : { connectionString: stripSslMode(databaseUrl), ssl: { rejectUnauthorized: false } };
+
+const client = new Client(clientConfig);
 
 try {
   await client.connect();
