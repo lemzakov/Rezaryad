@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   try {
     const payload = { text: trimmedText };
     const resp = await fetch(
-      `${MAX_API_BASE}/messages?chat_id=${encodeURIComponent(maxId)}`,
+      `${MAX_API_BASE}/messages?user_id=${encodeURIComponent(maxId)}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: MAX_BOT_TOKEN },
