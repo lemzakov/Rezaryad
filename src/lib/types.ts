@@ -4,16 +4,20 @@ export type Language = 'RU' | 'UZ' | 'TJ';
 export type CellStatus = 'FREE' | 'BUSY' | 'BROKEN';
 export type BookingStatus = 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'CONVERTED';
 export type PaymentStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
+export type RegistrationStatus = 'PENDING_REGISTRATION' | 'ACTIVE';
+export type MessageDirection = 'IN' | 'OUT';
 
 export interface DbUser {
   id: string;
   max_id: string;
   phone: string | null;
+  name: string | null;
   language: Language;
   is_verified: boolean;
   verification_data: Record<string, unknown> | null;
   has_debt: boolean;
   debt_amount: number;
+  registration_status: RegistrationStatus;
   created_at: string;
   updated_at: string;
 }
@@ -128,6 +132,15 @@ export interface DbWaitQueue {
   created_at: string;
 }
 
+export interface DbMaxMessage {
+  id: string;
+  user_id: string | null;
+  max_id: string;
+  direction: MessageDirection;
+  text: string;
+  created_at: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Supabase Database type — enables full type safety for all client operations.
 // Row = shape returned by SELECT
@@ -139,10 +152,12 @@ export interface UserInsert {
   max_id: string;
   language?: Language;
   phone?: string | null;
+  name?: string | null;
   is_verified?: boolean;
   verification_data?: Record<string, unknown> | null;
   has_debt?: boolean;
   debt_amount?: number;
+  registration_status?: RegistrationStatus;
 }
 
 export interface PaymentCardInsert {
@@ -234,6 +249,13 @@ export interface WaitQueueInsert {
   position: number;
 }
 
+export interface MaxMessageInsert {
+  user_id?: string | null;
+  max_id: string;
+  direction?: MessageDirection;
+  text: string;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -307,6 +329,12 @@ export interface Database {
         Row: DbWaitQueue;
         Insert: WaitQueueInsert;
         Update: Partial<WaitQueueInsert>;
+        Relationships: [];
+      };
+      max_messages: {
+        Row: DbMaxMessage;
+        Insert: MaxMessageInsert;
+        Update: Partial<MaxMessageInsert>;
         Relationships: [];
       };
     };

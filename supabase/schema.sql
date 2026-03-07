@@ -28,16 +28,18 @@ exception when duplicate_object then null; end $$;
 -- ─────────────────────────────────────────────
 
 create table if not exists users (
-  id              text        primary key default gen_random_uuid()::text,
-  max_id          text        unique not null,
-  phone           text,
-  language        language_enum not null default 'RU',
-  is_verified     boolean     not null default false,
-  verification_data jsonb,
-  has_debt        boolean     not null default false,
-  debt_amount     numeric(10,2) not null default 0,
-  created_at      timestamptz not null default now(),
-  updated_at      timestamptz not null default now()
+  id                  text        primary key default gen_random_uuid()::text,
+  max_id              text        unique not null,
+  phone               text,
+  name                text,
+  language            language_enum not null default 'RU',
+  is_verified         boolean     not null default false,
+  verification_data   jsonb,
+  has_debt            boolean     not null default false,
+  debt_amount         numeric(10,2) not null default 0,
+  registration_status text        not null default 'ACTIVE',
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
 );
 
 create table if not exists payment_cards (
@@ -151,6 +153,21 @@ create table if not exists wait_queue (
 );
 
 -- ─────────────────────────────────────────────
+-- MAX messenger debug message log
+-- ─────────────────────────────────────────────
+create table if not exists max_messages (
+  id          text    primary key default gen_random_uuid()::text,
+  user_id     text    references users(id),
+  max_id      text    not null,
+  direction   text    not null default 'IN',  -- 'IN' = received from user, 'OUT' = sent to user
+  text        text    not null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists idx_max_messages_max_id on max_messages(max_id);
+create index if not exists idx_max_messages_created_at on max_messages(created_at);
+
+-- ─────────────────────────────────────────────
 -- Indexes for common query patterns
 -- ─────────────────────────────────────────────
 create index if not exists idx_users_max_id on users(max_id);
@@ -183,6 +200,25 @@ alter table payments disable row level security;
 alter table notifications disable row level security;
 alter table admin_users disable row level security;
 alter table wait_queue disable row level security;
+alter table max_messages disable row level security;
+
+-- ─────────────────────────────────────────────
+-- Idempotent column additions (safe to re-run on existing DB)
+-- ─────────────────────────────────────────────
+do $$ begin
+  alter table users add column name text;
+exception when duplicate_column then null; end $$;
+
+do $$ begin
+  alter table users add column registration_status text default 'ACTIVE';
+exception when duplicate_column then null; end $$;
+
+-- Ensure existing rows have the default value before adding NOT NULL
+update users set registration_status = 'ACTIVE' where registration_status is null;
+
+do $$ begin
+  alter table users alter column registration_status set not null;
+exception when others then null; end $$;
 
 -- ─────────────────────────────────────────────
 -- Auto-update updated_at on users

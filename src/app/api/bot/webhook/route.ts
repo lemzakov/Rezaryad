@@ -113,6 +113,16 @@ async function handleMessage(update: Record<string, unknown>) {
   const user = await getOrCreateUser(maxId);
   const lang = user.language;
 
+  // Log incoming message for debug panel
+  if (text) {
+    void supabase.from('max_messages').insert({
+      user_id: user.id,
+      max_id: maxId,
+      direction: 'IN' as const,
+      text: text.slice(0, 1000),
+    });
+  }
+
   if (text.toLowerCase() === '/start' || text.toLowerCase() === 'start') {
     await sendMessage(chatId, getMsg('welcome', lang), langKb());
     return;

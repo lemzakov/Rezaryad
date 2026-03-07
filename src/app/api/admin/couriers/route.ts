@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
 
   const { data: users } = await supabase
     .from('users')
-    .select('id, max_id, phone, is_verified, has_debt, debt_amount, created_at')
+    .select('id, max_id, phone, name, is_verified, has_debt, debt_amount, registration_status, created_at')
     .order('created_at', { ascending: false });
 
   const result = await Promise.all(
@@ -47,7 +47,9 @@ export async function GET(req: NextRequest) {
         id: u.id,
         max_id: u.max_id,
         phone: u.phone ?? '—',
+        name: u.name ?? null,
         is_verified: u.is_verified,
+        registration_status: u.registration_status ?? 'ACTIVE',
         has_debt: u.has_debt,
         debt_amount: Math.round(Number(u.debt_amount) * 100) / 100,
         active_sessions: activeSessions ?? 0,
