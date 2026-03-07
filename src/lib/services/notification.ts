@@ -2,17 +2,14 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { MAX_BOT_TOKEN, MAX_API_BASE } from '../config';
 
 async function sendMessage(chatId: string, text: string, keyboard?: unknown): Promise<void> {
-  const payload: Record<string, unknown> = {
-    recipient: { chat_id: chatId },
-    body: { type: 'text', text },
-  };
+  const payload: Record<string, unknown> = { text };
   if (keyboard) {
-    (payload.body as Record<string, unknown>).attachments = [keyboard];
+    payload.attachments = [keyboard];
   }
   try {
-    await fetch(`${MAX_API_BASE}/messages?access_token=${MAX_BOT_TOKEN}`, {
+    await fetch(`${MAX_API_BASE}/messages?chat_id=${encodeURIComponent(chatId)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: MAX_BOT_TOKEN },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000),
     });

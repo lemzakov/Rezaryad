@@ -22,13 +22,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const res = await fetch(
-      `${MAX_API_BASE}/subscriptions?access_token=${MAX_BOT_TOKEN}`,
+      `${MAX_API_BASE}/subscriptions`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: MAX_BOT_TOKEN },
         body: JSON.stringify({
           url: webhookUrl,
-          update_types: ['message_created', 'message_callback'],
+          update_types: ['message_created', 'message_callback', 'bot_started'],
         }),
         signal: AbortSignal.timeout(15000),
       },
@@ -62,9 +62,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const res = await fetch(
-      `${MAX_API_BASE}/subscriptions?access_token=${MAX_BOT_TOKEN}`,
+      `${MAX_API_BASE}/subscriptions`,
       {
         method: 'GET',
+        headers: { Authorization: MAX_BOT_TOKEN },
         signal: AbortSignal.timeout(10000),
       },
     );

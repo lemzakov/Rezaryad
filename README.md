@@ -109,11 +109,12 @@ https://rezaryad.vercel.app/api/bot/webhook
 
 Or use curl:
 ```bash
-curl -X POST "https://botapi.max.ru/subscriptions?access_token=<MAX_BOT_TOKEN>" \
+curl -X POST "https://platform-api.max.ru/subscriptions" \
+  -H "Authorization: <MAX_BOT_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://rezaryad.vercel.app/api/bot/webhook",
-    "update_types": ["message_created", "message_callback"]
+    "update_types": ["message_created", "message_callback", "bot_started"]
   }'
 ```
 

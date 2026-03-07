@@ -27,8 +27,8 @@ export async function GET(req: NextRequest) {
   if (MAX_BOT_TOKEN) {
     try {
       const resp = await fetch(
-        `${MAX_API_BASE}/subscriptions?access_token=${MAX_BOT_TOKEN}`,
-        { signal: AbortSignal.timeout(5000) },
+        `${MAX_API_BASE}/subscriptions`,
+        { headers: { Authorization: MAX_BOT_TOKEN }, signal: AbortSignal.timeout(5000) },
       );
       if (resp.ok) {
         subscriptions = await resp.json();
