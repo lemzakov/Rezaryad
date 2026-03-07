@@ -7,7 +7,9 @@ import { PaymentService } from '@/lib/services/payment';
 import { MAX_BOT_TOKEN, MAX_API_BASE, BOOKING_FREE_MINS, BOOKING_FREE_MINS_SUBSCRIBED } from '@/lib/config';
 import type { DbUser } from '@/lib/types';
 
-async function sendMessage(chatId: string, text: string, keyboard?: unknown): Promise<void> {
+type LogCtx = { userId: string; maxId: string };
+
+async function sendMessage(chatId: string, text: string, keyboard?: unknown, logCtx?: LogCtx): Promise<void> {
   const payload: Record<string, unknown> = { text };
   if (keyboard) {
     payload.attachments = [keyboard];
@@ -19,6 +21,14 @@ async function sendMessage(chatId: string, text: string, keyboard?: unknown): Pr
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000),
     });
+    if (logCtx) {
+      void supabase.from('max_messages').insert({
+        user_id: logCtx.userId,
+        max_id: logCtx.maxId,
+        direction: 'OUT' as const,
+        text: text.slice(0, 1000),
+      });
+    }
   } catch (e) {
     console.error('sendMessage error:', e instanceof Error ? e.message : String(e));
   }
@@ -44,7 +54,11 @@ function inlineKeyboard(buttons: { type: string; text: string; payload?: string;
 function btn(text: string, payload: string) { return { type: 'callback', text, payload }; }
 
 const MSGS: Record<string, Record<string, string>> = {
-  welcome: { RU: '👋 Добро пожаловать в Rezaryad!\nВыберите язык:', UZ: "👋 Rezaryad xizmatiga xush kelibsiz!\nTilni tanlang:", TJ: '👋 Хуш омадед ба Rezaryad!\nЗабонро интихоб кунед:' },
+  welcome: {
+    RU: '👋 Добро пожаловать в Rezaryad!\n🆔 Ваш MAX ID: {maxId}\nВыберите язык:',
+    UZ: "👋 Rezaryad xizmatiga xush kelibsiz!\n🆔 Sizning MAX ID: {maxId}\nTilni tanlang:",
+    TJ: '👋 Хуш омадед ба Rezaryad!\n🆔 MAX ID-и шумо: {maxId}\nЗабонро интихоб кунед:',
+  },
   main_menu: { RU: '🏠 Главное меню', UZ: '🏠 Asosiy menyu', TJ: '🏠 Менюи асосӣ' },
   scan_qr: { RU: '📷 Отсканируйте QR-код на шкафчике:', UZ: '📷 Shkafchadagi QR-kodni skanerlang:', TJ: '📷 QR-рамзи қуттиро скан кунед:' },
   no_free_cells: { RU: '😔 Нет свободных ячеек. Хотите встать в очередь?', UZ: "😔 Bo'sh kataklar yo'q. Navbatga turishni xohlaysizmi?", TJ: '😔 Ячейкаҳои озод нест. Мехоҳед дар навбат бистед?' },
@@ -55,6 +69,41 @@ const MSGS: Record<string, Record<string, string>> = {
   max_sessions: { RU: '🚫 Достигнут лимит активных аренд (максимум 2).', UZ: '🚫 Faol ijaralar chegarasiga yetildi (maksimum 2).', TJ: '🚫 Ба ҳадди аксари иҷораҳои фаъол расидед (максимум 2).' },
   queue_joined: { RU: '⏳ Вы добавлены в очередь. Ваша позиция: #{position}', UZ: "⏳ Navbatga qo'shildingiz. Sizning o'rningiz: #{position}", TJ: '⏳ Шумо ба навбат илова шудед. Мавқеи шумо: #{position}' },
   debt_cleared: { RU: '✅ Задолженность погашена! Теперь вы можете арендовать ячейки.', UZ: "✅ Qarz to'landi! Endi kataklar ijaraga olishingiz mumkin.", TJ: '✅ Қарз пардохт шуд! Акнун шумо метавонед ячейкаҳо иҷора кунед.' },
+  onboarding_ask_name: {
+    RU: '📝 Регистрация курьера\n\nШаг 1/2: Введите ваше полное имя (Фамилия Имя):',
+    UZ: "📝 Kuryer ro'yxatdan o'tish\n\n1/2-qadam: To'liq ismingizni kiriting (Familiya Ism):",
+    TJ: '📝 Сабти номи курьер\n\nҚадами 1/2: Номи пурраи худро ворид кунед (Насаб Ном):',
+  },
+  onboarding_ask_phone: {
+    RU: '📱 Шаг 2/2: Введите ваш номер телефона (например: +7XXXXXXXXXX):',
+    UZ: "📱 2/2-qadam: Telefon raqamingizni kiriting (masalan: +998XXXXXXXXX):",
+    TJ: '📱 Қадами 2/2: Рақами телефони худро ворид кунед (масалан: +992XXXXXXXXX):',
+  },
+  onboarding_done: {
+    RU: '✅ Заявка на регистрацию принята!\n\nАдминистратор рассмотрит вашу заявку и активирует аккаунт. Мы уведомим вас.',
+    UZ: "✅ Ro'yxatdan o'tish uchun ariza qabul qilindi!\n\nAdministrator arizangizni ko'rib chiqadi va hisobingizni faollashtiradi.",
+    TJ: '✅ Дархости сабти ном қабул шуд!\n\nМудир дархости шуморо баррасӣ карда, ҳисобро фаъол мекунад.',
+  },
+  onboarding_name_too_short: {
+    RU: '⚠️ Имя слишком короткое. Введите полное имя (минимум 2 символа):',
+    UZ: "⚠️ Ism juda qisqa. To'liq ismingizni kiriting (kamida 2 ta belgi):",
+    TJ: '⚠️ Ном хеле кӯтоҳ аст. Номи пурраро ворид кунед (ҳадди ақал 2 аломат):',
+  },
+  onboarding_phone_invalid: {
+    RU: '⚠️ Неверный формат номера. Введите номер в формате +7XXXXXXXXXX:',
+    UZ: "⚠️ Noto'g'ri raqam formati. Raqamni +998XXXXXXXXX formatida kiriting:",
+    TJ: '⚠️ Формати нодурусти рақам. Рақамро дар формати +992XXXXXXXXX ворид кунед:',
+  },
+  already_registered: {
+    RU: '✅ Вы уже зарегистрированы как курьер.',
+    UZ: "✅ Siz allaqachon kuryer sifatida ro'yxatdan o'tgansiz.",
+    TJ: '✅ Шумо аллакай ҳамчун курьер сабти ном шудаед.',
+  },
+  pending_registration: {
+    RU: '⏳ Ваша заявка уже ожидает рассмотрения администратором.',
+    UZ: '⏳ Arizangiz allaqachon administrator tomonidan ko\'rib chiqilmoqda.',
+    TJ: '⏳ Дархости шумо аллакай аз ҷониби мудир дида истодааст.',
+  },
 };
 
 function getMsg(key: string, lang: string, vars: Record<string, unknown> = {}): string {
@@ -64,13 +113,16 @@ function getMsg(key: string, lang: string, vars: Record<string, unknown> = {}): 
   return tmpl;
 }
 
-function mainMenuKb(lang: string) {
+function mainMenuKb(lang: string, isRegistered = true) {
   const labels = (
-    lang === 'UZ' ? ["🗺 Shkafchalar xaritasi", '📷 QR skanerlash', '👤 Shaxsiy kabinet'] :
-    lang === 'TJ' ? ['🗺 Харитаи қуттиҳо', '📷 Сканерзии QR', '👤 Кабинети шахсӣ'] :
-    ['🗺 Карта шкафчиков', '📷 Сканировать QR', '👤 Личный кабинет']
+    lang === 'UZ' ? ["🗺 Shkafchalar xaritasi", '📷 QR skanerlash', '👤 Shaxsiy kabinet', "📝 Ro'yxatdan o'tish"] :
+    lang === 'TJ' ? ['🗺 Харитаи қуттиҳо', '📷 Сканерзии QR', '👤 Кабинети шахсӣ', '📝 Сабти ном'] :
+    ['🗺 Карта шкафчиков', '📷 Сканировать QR', '👤 Личный кабинет', '📝 Регистрация']
   );
-  return inlineKeyboard([[btn(labels[0], 'menu:map')], [btn(labels[1], 'menu:scan_qr')], [btn(labels[2], 'menu:cabinet')]]);
+  const rows = isRegistered
+    ? [[btn(labels[0], 'menu:map')], [btn(labels[1], 'menu:scan_qr')], [btn(labels[2], 'menu:cabinet')]]
+    : [[btn(labels[3], 'register:start')], [btn(labels[0], 'menu:map')], [btn(labels[1], 'menu:scan_qr')], [btn(labels[2], 'menu:cabinet')]];
+  return inlineKeyboard(rows);
 }
 
 function langKb() { return inlineKeyboard([[btn('🇷🇺 Русский', 'lang:RU'), btn("🇺🇿 O'zbek", 'lang:UZ'), btn('🇹🇯 Тоҷикӣ', 'lang:TJ')]]); }
@@ -80,6 +132,11 @@ function queueJoinKb(lang: string, lockerId: string) { const [yes, no] = lang ==
 function debtKb(lang: string) { const label = lang === 'UZ' ? "💳 Qarzni to'lash" : lang === 'TJ' ? '💳 Пардохти қарз' : '💳 Погасить долг'; return inlineKeyboard([[btn(label, 'debt:pay')]]); }
 function confirmBookingKb(lang: string, cellId: string) { const [yes, no] = lang === 'UZ' ? ['✅ Tasdiqlash', '❌ Bekor qilish'] : lang === 'TJ' ? ['✅ Тасдиқ кардан', '❌ Бекор кардан'] : ['✅ Подтвердить', '❌ Отмена']; return inlineKeyboard([[btn(yes, `book:confirm:${cellId}`), btn(no, 'book:cancel')]]); }
 function lockerKb(lang: string, lockerId: string, hasFreeCells: boolean) { if (hasFreeCells) { const label = lang === 'UZ' ? '📋 Bron qilish' : lang === 'TJ' ? '📋 Бронировон кардан' : '📋 Забронировать'; return inlineKeyboard([[btn(label, `book:locker:${lockerId}`)]]); } else { const label = lang === 'UZ' ? '⏳ Navbatga turish' : lang === 'TJ' ? '⏳ Ба навбат гузоштан' : '⏳ Встать в очередь'; return inlineKeyboard([[btn(label, `queue:join:${lockerId}`)]]); } }
+
+/** Returns true when the user has completed or submitted courier registration */
+function isCourierRegistered(user: DbUser): boolean {
+  return user.is_verified || user.registration_status === 'PENDING_REGISTRATION';
+}
 
 async function getOrCreateUser(maxId: string): Promise<DbUser> {
   const { data: existing } = await supabase
@@ -106,7 +163,8 @@ async function handleBotStarted(update: Record<string, unknown>) {
 
   const user = await getOrCreateUser(maxId);
   const lang = user.language;
-  await sendMessage(chatId, getMsg('welcome', lang), langKb());
+  const log: LogCtx = { userId: user.id, maxId };
+  await sendMessage(chatId, getMsg('welcome', lang, { maxId }), langKb(), log);
 }
 
 async function handleMessage(update: Record<string, unknown>) {
@@ -120,6 +178,7 @@ async function handleMessage(update: Record<string, unknown>) {
 
   const user = await getOrCreateUser(maxId);
   const lang = user.language;
+  const log: LogCtx = { userId: user.id, maxId };
 
   // Log incoming message for debug panel
   if (text) {
@@ -131,12 +190,42 @@ async function handleMessage(update: Record<string, unknown>) {
     });
   }
 
+  // Handle onboarding conversation states
+  if (user.bot_state === 'ONBOARDING_NAME') {
+    if (text.trim().length < 2) {
+      await sendMessage(chatId, getMsg('onboarding_name_too_short', lang), undefined, log);
+      return;
+    }
+    await supabase.from('users').update({ name: text.trim(), bot_state: 'ONBOARDING_PHONE' }).eq('id', user.id);
+    await sendMessage(chatId, getMsg('onboarding_ask_phone', lang), undefined, log);
+    return;
+  }
+
+  if (user.bot_state === 'ONBOARDING_PHONE') {
+    const phoneRegex = /^\+\d{7,15}$/;
+    if (!phoneRegex.test(text.trim())) {
+      await sendMessage(chatId, getMsg('onboarding_phone_invalid', lang), undefined, log);
+      return;
+    }
+    await supabase.from('users').update({
+      phone: text.trim(),
+      bot_state: null,
+      registration_status: 'PENDING_REGISTRATION',
+    }).eq('id', user.id);
+    await sendMessage(chatId, getMsg('onboarding_done', lang), mainMenuKb(lang, false), log);
+    return;
+  }
   if (text.toLowerCase() === '/start' || text.toLowerCase() === 'start') {
-    await sendMessage(chatId, getMsg('welcome', lang), langKb());
+    const isRegistered = isCourierRegistered(user);
+    await sendMessage(chatId, getMsg('welcome', lang, { maxId }), langKb(), log);
+    if (!isRegistered) {
+      await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, false), log);
+    }
     return;
   }
   if (text.toLowerCase() === '/menu') {
-    await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang));
+    const isRegistered = isCourierRegistered(user);
+    await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
     return;
   }
   if (text.length > 6 && !text.startsWith('/')) {
@@ -155,15 +244,16 @@ async function handleMessage(update: Record<string, unknown>) {
       const currency = (({ RU: 'руб/мин', UZ: "so'm/daq", TJ: 'сомонӣ/дақ' }) as Record<string, string>)[lang] || 'руб/мин';
       const tariffLines = (tariffs ?? []).map((t) => `  • ${t.name}: ${t.price_per_minute} ${currency}`).join('\n');
       if (freeCells.length === 0) {
-        await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, locker.id));
+        await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, locker.id), log);
       } else {
         const infoText = `🔋 Шкафчик: ${locker.name}\n📍 Адрес: ${locker.address}\n🟢 Свободных ячеек: ${freeCells.length}\n\n💰 Тарифы:\n${tariffLines || '—'}`;
-        await sendMessage(chatId, infoText, lockerKb(lang, locker.id, true));
+        await sendMessage(chatId, infoText, lockerKb(lang, locker.id, true), log);
       }
       return;
     }
   }
-  await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang));
+  const isRegistered = isCourierRegistered(user);
+  await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
 }
 
 async function handleCallback(update: Record<string, unknown>) {
@@ -179,6 +269,7 @@ async function handleCallback(update: Record<string, unknown>) {
   if (!maxId) return;
   const user = await getOrCreateUser(maxId);
   const lang = user.language;
+  const log: LogCtx = { userId: user.id, maxId };
   const parts = payload.split(':');
 
   try {
@@ -186,24 +277,42 @@ async function handleCallback(update: Record<string, unknown>) {
       const newLang = parts[1];
       if (['RU', 'UZ', 'TJ'].includes(newLang)) {
         await supabase.from('users').update({ language: newLang }).eq('id', user.id);
+        const isRegistered = isCourierRegistered(user);
         await answerCallback(callbackId, getMsg('main_menu', newLang));
-        await sendMessage(chatId, getMsg('main_menu', newLang), mainMenuKb(newLang));
+        await sendMessage(chatId, getMsg('main_menu', newLang), mainMenuKb(newLang, isRegistered), log);
+      }
+    } else if (parts[0] === 'register') {
+      if (parts[1] === 'start') {
+        if (user.is_verified) {
+          await answerCallback(callbackId, getMsg('already_registered', lang));
+          await sendMessage(chatId, getMsg('already_registered', lang), undefined, log);
+          return;
+        }
+        if (user.registration_status === 'PENDING_REGISTRATION' && !user.bot_state) {
+          await answerCallback(callbackId, getMsg('pending_registration', lang));
+          await sendMessage(chatId, getMsg('pending_registration', lang), mainMenuKb(lang, true), log);
+          return;
+        }
+        await supabase.from('users').update({ bot_state: 'ONBOARDING_NAME' }).eq('id', user.id);
+        await answerCallback(callbackId, '📝');
+        await sendMessage(chatId, getMsg('onboarding_ask_name', lang), undefined, log);
       }
     } else if (parts[0] === 'menu') {
       const action = parts[1];
-      if (action === 'main') await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang));
-      else if (action === 'scan_qr') await sendMessage(chatId, getMsg('scan_qr', lang));
+      const isRegistered = isCourierRegistered(user);
+      if (action === 'main') await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
+      else if (action === 'scan_qr') await sendMessage(chatId, getMsg('scan_qr', lang), undefined, log);
       else if (action === 'map') {
         const { data: lockers } = await supabase.from('lockers').select('name, address').eq('is_active', true);
         const lines = (lockers ?? []).map((l) => `📍 ${l.name} — ${l.address}`).join('\n');
-        await sendMessage(chatId, lines ? `🗺 Шкафчики:\n${lines}` : 'Нет активных шкафчиков');
+        await sendMessage(chatId, lines ? `🗺 Шкафчики:\n${lines}` : 'Нет активных шкафчиков', undefined, log);
       } else if (action === 'cabinet') {
         const [{ count: totalSessions }, { count: activeSessions }] = await Promise.all([
           supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
           supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('user_id', user.id).is('end_at', null),
         ]);
         const cabinetText = `👤 Личный кабинет\n\n📊 Статистика:\n💳 Долг: ${Number(user.debt_amount).toFixed(2)}\n✅ Сессий всего: ${totalSessions ?? 0}\n🔋 Активных аренд: ${activeSessions ?? 0}`;
-        await sendMessage(chatId, cabinetText, cabinetKb(lang));
+        await sendMessage(chatId, cabinetText, cabinetKb(lang), log);
       }
     } else if (parts[0] === 'cabinet') {
       const action = parts[1];
@@ -220,8 +329,8 @@ async function handleCallback(update: Record<string, unknown>) {
             const cost = s.cost != null ? Number(s.cost).toFixed(2) : '0.00';
             return `📅 ${new Date(s.start_at).toLocaleDateString()} | ⏱${dur}мин | 💰${cost}`;
           });
-          await sendMessage(chatId, '📋 Ваши сессии:\n' + lines.join('\n'));
-        } else await sendMessage(chatId, 'Нет сессий');
+          await sendMessage(chatId, '📋 Ваши сессии:\n' + lines.join('\n'), undefined, log);
+        } else await sendMessage(chatId, 'Нет сессий', undefined, log);
       } else if (action === 'cards') {
         const { data: cards } = await supabase
           .from('payment_cards')
@@ -229,8 +338,8 @@ async function handleCallback(update: Record<string, unknown>) {
           .eq('user_id', user.id)
           .eq('is_active', true);
         if (cards && cards.length > 0)
-          await sendMessage(chatId, 'Ваши карты:\n' + cards.map((c) => `💳 **** ${c.last_four}`).join('\n'));
-        else await sendMessage(chatId, 'Карты не привязаны');
+          await sendMessage(chatId, 'Ваши карты:\n' + cards.map((c) => `💳 **** ${c.last_four}`).join('\n'), undefined, log);
+        else await sendMessage(chatId, 'Карты не привязаны', undefined, log);
       } else if (action === 'subscription') {
         const { data: sub } = await supabase
           .from('subscriptions')
@@ -238,30 +347,30 @@ async function handleCallback(update: Record<string, unknown>) {
           .eq('user_id', user.id)
           .eq('is_active', true)
           .maybeSingle();
-        if (sub) await sendMessage(chatId, `✅ Подписка активна до ${new Date(sub.end_at).toLocaleDateString()}`);
-        else await sendMessage(chatId, '❌ Нет активной подписки');
+        if (sub) await sendMessage(chatId, `✅ Подписка активна до ${new Date(sub.end_at).toLocaleDateString()}`, undefined, log);
+        else await sendMessage(chatId, '❌ Нет активной подписки', undefined, log);
       }
     } else if (parts[0] === 'book' && parts[1] === 'locker') {
       const lockerId = parts[2];
       if (user.has_debt) {
-        await sendMessage(chatId, getMsg('has_debt', lang, { amount: Number(user.debt_amount).toFixed(2) }), debtKb(lang));
+        await sendMessage(chatId, getMsg('has_debt', lang, { amount: Number(user.debt_amount).toFixed(2) }), debtKb(lang), log);
         return;
       }
-      if (!user.is_verified) { await sendMessage(chatId, getMsg('not_verified', lang)); return; }
+      if (!user.is_verified) { await sendMessage(chatId, getMsg('not_verified', lang), undefined, log); return; }
       const [{ count: activeBookings }, { count: activeSessions }] = await Promise.all([
         supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('status', 'ACTIVE'),
         supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('user_id', user.id).is('end_at', null),
       ]);
-      if ((activeBookings ?? 0) >= 1) { await sendMessage(chatId, getMsg('max_bookings', lang)); return; }
-      if ((activeSessions ?? 0) >= 2) { await sendMessage(chatId, getMsg('max_sessions', lang)); return; }
+      if ((activeBookings ?? 0) >= 1) { await sendMessage(chatId, getMsg('max_bookings', lang), undefined, log); return; }
+      if ((activeSessions ?? 0) >= 2) { await sendMessage(chatId, getMsg('max_sessions', lang), undefined, log); return; }
       const [{ data: cell }, { data: locker }, { data: sub }] = await Promise.all([
         supabase.from('cells').select('id, number').eq('locker_id', lockerId).eq('status', 'FREE').maybeSingle(),
         supabase.from('lockers').select('name').eq('id', lockerId).maybeSingle(),
         supabase.from('subscriptions').select('id').eq('user_id', user.id).eq('is_active', true).maybeSingle(),
       ]);
-      if (!cell) { await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId)); return; }
+      if (!cell) { await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId), log); return; }
       const freeMins = sub ? BOOKING_FREE_MINS_SUBSCRIBED : BOOKING_FREE_MINS;
-      await sendMessage(chatId, `📋 Подтвердить бронирование?\n🔋 Ячейка #${cell.number} в ${locker?.name || '—'}\n⏱ Бесплатно: ${freeMins} мин`, confirmBookingKb(lang, cell.id));
+      await sendMessage(chatId, `📋 Подтвердить бронирование?\n🔋 Ячейка #${cell.number} в ${locker?.name || '—'}\n⏱ Бесплатно: ${freeMins} мин`, confirmBookingKb(lang, cell.id), log);
     } else if (parts[0] === 'book' && parts[1] === 'confirm') {
       const cellId = parts[2];
       const svc = new BookingService(supabase);
@@ -277,10 +386,12 @@ async function handleCallback(update: Record<string, unknown>) {
           chatId,
           `✅ Бронирование создано!\n⏰ Действует до: ${new Date(booking.ends_at).toLocaleTimeString()}\nЯчейка #${cell?.number || '?'}`,
           sessionKb(lang, 'pending'),
+          log,
         );
-      } catch (e) { await sendMessage(chatId, String(e)); }
+      } catch (e) { await sendMessage(chatId, String(e), undefined, log); }
     } else if (parts[0] === 'book' && parts[1] === 'cancel') {
-      await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang));
+      const isRegistered = isCourierRegistered(user);
+      await sendMessage(chatId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
     } else if (parts[0] === 'session' && parts[1] === 'end') {
       const sessionId = parts[2];
       if (sessionId === 'pending') {
@@ -298,6 +409,7 @@ async function handleCallback(update: Record<string, unknown>) {
             chatId,
             `🔓 Ячейка открыта! Сессия началась.\n⏱ Начало: ${new Date(session.start_at).toLocaleTimeString()}`,
             sessionKb(lang, session.id),
+            log,
           );
         }
         return;
@@ -309,26 +421,28 @@ async function handleCallback(update: Record<string, unknown>) {
         await sendMessage(
           chatId,
           `✅ Сессия завершена!\n⏱ Длительность: ${Number(ended.duration_mins ?? 0).toFixed(1)} мин\n💰 Стоимость: ${Number(ended.cost ?? 0).toFixed(2)} руб`,
+          undefined,
+          log,
         );
-      } catch (e) { await sendMessage(chatId, String(e)); }
+      } catch (e) { await sendMessage(chatId, String(e), undefined, log); }
     } else if (parts[0] === 'queue') {
       const action = parts[1];
       const lockerId = parts[2];
-      if (action === 'join') await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId));
+      if (action === 'join') await sendMessage(chatId, getMsg('no_free_cells', lang), queueJoinKb(lang, lockerId), log);
       else if (action === 'confirm') {
         const svc = new QueueService(supabase);
         const entry = await svc.joinQueue(user.id, lockerId);
         await answerCallback(callbackId, '✅');
-        await sendMessage(chatId, getMsg('queue_joined', lang, { position: entry.position }));
+        await sendMessage(chatId, getMsg('queue_joined', lang, { position: entry.position }), undefined, log);
       }
     } else if (parts[0] === 'debt' && parts[1] === 'pay') {
       const svc = new PaymentService(supabase);
       const result = await svc.processDebt(user.id);
-      await sendMessage(chatId, result ? getMsg('debt_cleared', lang) : getMsg('error_generic', lang));
+      await sendMessage(chatId, result ? getMsg('debt_cleared', lang) : getMsg('error_generic', lang), undefined, log);
     }
   } catch (e) {
     console.error('Callback handler error:', e);
-    await sendMessage(chatId, getMsg('error_generic', lang));
+    await sendMessage(chatId, getMsg('error_generic', lang), undefined, log);
   }
 }
 
