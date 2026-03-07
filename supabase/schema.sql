@@ -38,6 +38,7 @@ create table if not exists users (
   has_debt            boolean     not null default false,
   debt_amount         numeric(10,2) not null default 0,
   registration_status text        not null default 'ACTIVE',
+  bot_state           text,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
@@ -235,3 +236,10 @@ drop trigger if exists users_updated_at on users;
 create trigger users_updated_at
   before update on users
   for each row execute function update_updated_at();
+
+-- ─────────────────────────────────────────────
+-- Add bot_state column for onboarding conversation tracking
+-- ─────────────────────────────────────────────
+do $$ begin
+  alter table users add column bot_state text;
+exception when duplicate_column then null; end $$;

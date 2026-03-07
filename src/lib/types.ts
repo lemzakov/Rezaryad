@@ -18,6 +18,7 @@ export interface DbUser {
   has_debt: boolean;
   debt_amount: number;
   registration_status: RegistrationStatus;
+  bot_state: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -158,6 +159,7 @@ export interface UserInsert {
   has_debt?: boolean;
   debt_amount?: number;
   registration_status?: RegistrationStatus;
+  bot_state?: string | null;
 }
 
 export interface PaymentCardInsert {

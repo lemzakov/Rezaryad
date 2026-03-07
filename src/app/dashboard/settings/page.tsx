@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, MaxDebugData, MaxMessage, MaxSubscriberInfo } from '@/lib/api';
 
 interface DebugInfo {
@@ -41,6 +41,8 @@ export default function SettingsPage() {
   const [sendLoading, setSendLoading] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'webhook' | 'debug'>('webhook');
+  const [liveMode, setLiveMode] = useState(false);
+  const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     api.getDebugInfo()
@@ -52,6 +54,30 @@ export default function SettingsPage() {
       .then(setWebhookStatus)
       .catch(() => setWebhookStatus(null));
   }, []);
+
+  // Live auto-refresh effect
+  useEffect(() => {
+    if (liveMode) {
+      const refresh = () => {
+        api.getMaxDebugData()
+          .then(d => { setMaxData(d); if (d.subscriptions) setWebhookStatus({ success: true, subscriptions: d.subscriptions }); })
+          .catch(() => {});
+      };
+      refresh();
+      liveIntervalRef.current = setInterval(refresh, 5000);
+    } else {
+      if (liveIntervalRef.current) {
+        clearInterval(liveIntervalRef.current);
+        liveIntervalRef.current = null;
+      }
+    }
+    return () => {
+      if (liveIntervalRef.current) {
+        clearInterval(liveIntervalRef.current);
+        liveIntervalRef.current = null;
+      }
+    };
+  }, [liveMode]);
 
   function loadMaxDebug() {
     setMaxLoading(true);
@@ -179,7 +205,7 @@ export default function SettingsPage() {
             📡 Webhook
           </button>
           <button
-            onClick={() => { setActiveTab('debug'); if (!maxData && !maxLoading) loadMaxDebug(); }}
+            onClick={() => { setActiveTab('debug'); if (!maxData && !maxLoading && !liveMode) loadMaxDebug(); }}
             className={`px-5 py-3 text-sm font-medium transition-colors ${activeTab === 'debug' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
           >
             🔬 Отладка
@@ -284,15 +310,29 @@ export default function SettingsPage() {
           {/* Debug Tab */}
           {activeTab === 'debug' && (
             <div className="space-y-5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <p className="text-sm text-gray-600">Интерактивная отладка MAX-бота: подписчики, сообщения, отправка</p>
-                <button
-                  onClick={loadMaxDebug}
-                  disabled={maxLoading}
-                  className="text-xs border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                >
-                  {maxLoading ? '...' : '🔄 Обновить'}
-                </button>
+                <div className="flex items-center gap-2">
+                  {liveMode && (
+                    <span className="flex items-center gap-1 text-xs font-semibold text-red-600 animate-pulse">
+                      <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
+                      LIVE
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setLiveMode(v => !v)}
+                    className={`text-xs px-3 py-1.5 rounded-lg transition-colors font-medium ${liveMode ? 'bg-red-100 border border-red-300 text-red-700 hover:bg-red-200' : 'border border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    {liveMode ? '⏹ Стоп' : '▶ Live'}
+                  </button>
+                  <button
+                    onClick={loadMaxDebug}
+                    disabled={maxLoading || liveMode}
+                    className="text-xs border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                  >
+                    {maxLoading ? '...' : '🔄 Обновить'}
+                  </button>
+                </div>
               </div>
 
               {maxError && (
