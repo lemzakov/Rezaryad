@@ -69,11 +69,35 @@ if (adminPassword.length < 8) {
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 const passwordHash = bcrypt.hashSync(adminPassword, 10);
 
-const { data: existing } = await supabase
+/** Returns true when the Supabase error indicates the table does not exist yet. */
+function isTableMissingError(err) {
+  if (!err) return false;
+  // PostgREST error when table is absent from the schema cache
+  return (
+    (typeof err.message === 'string' && err.message.includes('schema cache')) ||
+    err.code === 'PGRST204' ||
+    err.code === 'PGRST116'
+  );
+}
+
+const { data: existing, error: lookupError } = await supabase
   .from('admin_users')
   .select('id, login')
   .eq('login', adminLogin)
   .maybeSingle();
+
+if (lookupError) {
+  if (isTableMissingError(lookupError)) {
+    console.warn(
+      '[create-admin] ⚠ Skipped: admin_users table not found in the database.\n' +
+        '  Make sure DATABASE_URL is set so the schema is created automatically, or\n' +
+        '  run supabase/schema.sql in the Supabase SQL editor, then redeploy.',
+    );
+    process.exit(0);
+  }
+  console.error('✗ Failed to look up admin:', lookupError.message);
+  process.exit(1);
+}
 
 if (existing) {
   const { error } = await supabase
@@ -81,6 +105,10 @@ if (existing) {
     .update({ password_hash: passwordHash })
     .eq('id', existing.id);
   if (error) {
+    if (isTableMissingError(error)) {
+      console.warn('[create-admin] ⚠ Skipped: admin_users table not found. Run schema.sql first.');
+      process.exit(0);
+    }
     console.error('✗ Failed to update admin:', error.message);
     process.exit(1);
   }
@@ -92,6 +120,10 @@ if (existing) {
     .select('id')
     .single();
   if (error) {
+    if (isTableMissingError(error)) {
+      console.warn('[create-admin] ⚠ Skipped: admin_users table not found. Run schema.sql first.');
+      process.exit(0);
+    }
     console.error('✗ Failed to create admin:', error.message);
     process.exit(1);
   }
