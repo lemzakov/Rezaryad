@@ -9,6 +9,7 @@ const navItems = [
   { href: '/dashboard/sessions', label: 'Сессии', icon: '📋' },
   { href: '/dashboard/anomalies', label: 'Аномалии', icon: '⚠️' },
   { href: '/dashboard/stats', label: 'Статистика', icon: '📊' },
+  { href: '/dashboard/settings', label: 'Настройки', icon: '⚙️' },
 ];
 
 export default function Sidebar() {
