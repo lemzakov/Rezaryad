@@ -129,37 +129,36 @@ try {
   process.exit(0);
 }
 
-if (schemaExists) {
-  console.log('[setup-db] ✓ Schema already exists, skipping DDL.');
-} else {
-  // ── Run schema.sql ─────────────────────────────────────────────────────
-  const schemaPath = resolve(__dirname, '..', 'supabase', 'schema.sql');
-  let schemaSql;
-  try {
-    schemaSql = readFileSync(schemaPath, 'utf8');
-  } catch {
-    console.error(`[setup-db] ✗ Could not read ${schemaPath}`);
-    await client.end();
-    process.exit(0);
-  }
-
-  try {
-    await client.query(schemaSql);
-    console.log('[setup-db] ✓ Schema created successfully.');
-  } catch (err) {
-    console.error('[setup-db] ✗ Failed to apply schema.sql:', err.message);
-    await client.end();
-    // Non-zero exit so the operator knows seeding was incomplete.
-    process.exit(1);
-  }
-
-  // ── Run seed.sql automatically on first init ───────────────────────────
-  await runSeed('Seed data inserted.');
+// ── Run schema.sql (always — all DDL is idempotent) ─────────────────────────
+// schema.sql uses CREATE … IF NOT EXISTS and DO … EXCEPTION … END blocks,
+// so it is safe to re-run against an existing database. This ensures that
+// any new columns / indexes / triggers added to schema.sql are applied on
+// every deploy, even when the schema was first created by an older version.
+const schemaPath = resolve(__dirname, '..', 'supabase', 'schema.sql');
+let schemaSql;
+try {
+  schemaSql = readFileSync(schemaPath, 'utf8');
+} catch {
+  console.error(`[setup-db] ✗ Could not read ${schemaPath}`);
+  await client.end();
+  process.exit(0);
 }
 
-// ── Force re-seed if SEED_DB=true (even when schema already existed) ───────
-if (schemaExists && process.env.SEED_DB === 'true') {
-  await runSeed('Seed data re-applied (SEED_DB=true).');
+try {
+  await client.query(schemaSql);
+  console.log(schemaExists ? '[setup-db] ✓ Schema migrations applied.' : '[setup-db] ✓ Schema created successfully.');
+} catch (err) {
+  console.error('[setup-db] ✗ Failed to apply schema.sql:', err.message);
+  await client.end();
+  // Non-zero exit so the operator knows seeding was incomplete.
+  process.exit(1);
+}
+
+// ── Seed on first init or when forced ────────────────────────────────────────
+if (!schemaExists || process.env.SEED_DB === 'true') {
+  await runSeed(
+    schemaExists ? 'Seed data re-applied (SEED_DB=true).' : 'Seed data inserted.',
+  );
 }
 
 await client.end();
