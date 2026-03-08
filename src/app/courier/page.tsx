@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type AppState =
   | 'loading'        // detecting MAX WebApp context
@@ -45,31 +45,87 @@ export default function CourierApp() {
   const [name, setName] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [statusMsg, setStatusMsg] = useState<string>('');
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
+  const resolvedRef = useRef(false);
 
   useEffect(() => {
-    // Try to access MAX / Telegram WebApp SDK
-    const tg = window.Telegram?.WebApp;
+    const logs: string[] = [];
+    const addLog = (msg: string) => {
+      console.log('[CourierApp]', msg);
+      logs.push(msg);
+    };
 
-    if (tg?.initData) {
-      // Inside MAX messenger mini app
-      if (typeof tg.ready === 'function') tg.ready();
-      if (typeof tg.expand === 'function') tg.expand();
+    addLog(`Page loaded at ${new Date().toISOString()}`);
+    addLog(`URL: ${window.location.href}`);
 
-      setInitData(tg.initData);
+    function tryInitSdk(attempt: number) {
+      if (resolvedRef.current) return;
 
-      // Pre-fill name from SDK if available
-      const user = tg.initDataUnsafe?.user;
-      if (user) {
-        const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
-        setName(fullName);
-        setMaxId(String(user.id ?? ''));
+      const hasTelegram = typeof window.Telegram !== 'undefined';
+      const hasWebApp = hasTelegram && typeof window.Telegram?.WebApp !== 'undefined';
+      const tg = window.Telegram?.WebApp;
+      const hasInitData = !!(tg?.initData);
+
+      addLog(`Attempt ${attempt}: window.Telegram=${hasTelegram}, WebApp=${hasWebApp}, initData=${hasInitData}`);
+
+      if (hasInitData && tg) {
+        resolvedRef.current = true;
+        addLog('MAX WebApp context detected — initializing');
+        if (typeof tg.ready === 'function') tg.ready();
+        if (typeof tg.expand === 'function') tg.expand();
+
+        setInitData(tg.initData!);
+
+        const user = tg.initDataUnsafe?.user;
+        if (user) {
+          const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
+          addLog(`SDK user: id=${user.id}, name="${fullName}"`);
+          setName(fullName);
+          setMaxId(String(user.id ?? ''));
+        } else {
+          addLog('No user object in initDataUnsafe');
+        }
+
+        setDebugInfo([...logs]);
+        setAppState('form');
+        return true;
       }
 
-      setAppState('form');
-    } else {
-      // Not inside MAX messenger
-      setAppState('no_context');
+      return false;
     }
+
+    // Attempt 1: immediately
+    if (tryInitSdk(1)) return;
+
+    // Attempts 2–4: retry with increasing delays (MAX SDK may load asynchronously)
+    const delays = [200, 500, 1000];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    delays.forEach((delay, i) => {
+      timers.push(
+        setTimeout(() => {
+          if (resolvedRef.current) return;
+          if (tryInitSdk(i + 2)) return;
+
+          // After the last retry, give up and show no_context
+          if (i === delays.length - 1) {
+            resolvedRef.current = true;
+            addLog('SDK not found after all retries — showing no_context');
+            // Log available window keys that might be SDK-related
+            const sdkKeys = Object.keys(window).filter(
+              (k) => /telegram|webapp|max|vk|twa/i.test(k)
+            );
+            addLog(`SDK-like window keys: [${sdkKeys.join(', ') || 'none'}]`);
+            setDebugInfo([...logs]);
+            setAppState('no_context');
+          }
+        }, delay)
+      );
+    });
+
+    return () => {
+      timers.forEach(clearTimeout);
+    };
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -82,6 +138,7 @@ export default function CourierApp() {
 
     setAppState('submitting');
     setErrorMsg('');
+    console.log('[CourierApp] Submitting registration:', { name: trimmedName, hasInitData: !!initData });
 
     try {
       const res = await fetch('/api/couriers/register', {
@@ -91,6 +148,7 @@ export default function CourierApp() {
       });
 
       const data = await res.json();
+      console.log('[CourierApp] Registration response:', res.status, data);
 
       if (!res.ok) {
         setErrorMsg(data.detail || 'Ошибка при регистрации');
@@ -108,7 +166,7 @@ export default function CourierApp() {
     } catch (e) {
       setErrorMsg('Ошибка сети. Попробуйте ещё раз.');
       setAppState('form');
-      console.error('Registration error:', e);
+      console.error('[CourierApp] Registration error:', e);
     }
   }
 
@@ -140,6 +198,18 @@ export default function CourierApp() {
               <li>Нажмите кнопку «Открыть приложение»</li>
             </ol>
           </div>
+          {debugInfo.length > 0 && (
+            <details className="mt-4 text-left">
+              <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">
+                🔍 Диагностика (для разработчика)
+              </summary>
+              <div className="mt-2 bg-gray-900 rounded-xl p-3 text-xs font-mono text-green-400 space-y-1 overflow-auto max-h-48">
+                {debugInfo.map((line, i) => (
+                  <div key={i}>{line}</div>
+                ))}
+              </div>
+            </details>
+          )}
           <p className="mt-4 text-xs text-gray-400">
             Если вы разработчик, откройте эту страницу через mini-app в MAX для тестирования.
           </p>
