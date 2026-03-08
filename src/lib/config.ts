@@ -46,3 +46,6 @@ export const PENALTY_HOURS = 2;
 export const DOOR_OPEN_FRAUD_SECONDS = 30;
 export const MAX_ACTIVE_SESSIONS = 2;
 export const MAX_ACTIVE_BOOKINGS = 1;
+
+// External locker service integration (battery swap)
+export const LOCKER_SERVICE_URL: string = process.env.LOCKER_SERVICE_URL || '';

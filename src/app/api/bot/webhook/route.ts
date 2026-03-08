@@ -4,7 +4,8 @@ import { BookingService } from '@/lib/services/booking';
 import { SessionService } from '@/lib/services/session';
 import { QueueService } from '@/lib/services/queue';
 import { PaymentService } from '@/lib/services/payment';
-import { MAX_BOT_TOKEN, MAX_API_BASE, BOOKING_FREE_MINS, BOOKING_FREE_MINS_SUBSCRIBED } from '@/lib/config';
+import { LockerService } from '@/lib/services/locker';
+import { MAX_BOT_TOKEN, MAX_API_BASE, BOOKING_FREE_MINS, BOOKING_FREE_MINS_SUBSCRIBED, LOCKER_SERVICE_URL } from '@/lib/config';
 import type { DbUser } from '@/lib/types';
 
 type LogCtx = { userId: string; maxId: string };
@@ -56,6 +57,7 @@ function inlineKeyboard(buttons: { type: string; text: string; payload?: string;
 }
 
 function btn(text: string, payload: string) { return { type: 'callback', text, payload }; }
+function contactBtn(text: string) { return { type: 'request_contact', text }; }
 
 const MSGS: Record<string, Record<string, string>> = {
   welcome: {
@@ -108,6 +110,36 @@ const MSGS: Record<string, Record<string, string>> = {
     UZ: '⏳ Arizangiz allaqachon administrator tomonidan ko\'rib chiqilmoqda.',
     TJ: '⏳ Дархости шумо аллакай аз ҷониби мудир дида истодааст.',
   },
+  swap_ask_qr: {
+    RU: '🔄 Обмен батареи\n\n📷 Отсканируйте QR-код шкафчика или введите его вручную:',
+    UZ: "🔄 Batareya almashtirish\n\n📷 Shkafcha QR-kodini skanerlang yoki qo'lda kiriting:",
+    TJ: '🔄 Иваз кардани батарея\n\n📷 QR-рамзи қуттиро скан кунед ё дастӣ ворид кунед:',
+  },
+  swap_battery_not_found: {
+    RU: '❌ Батарея не найдена. У вас нет батарей на хранении.',
+    UZ: "❌ Batareya topilmadi. Sizda saqlashda batareya yo'q.",
+    TJ: '❌ Батарея ёфт нашуд. Шумо батарея дар нигаҳдорӣ надоред.',
+  },
+  swap_locker_open_failed: {
+    RU: '❌ Не удалось открыть шкафчик {lockerName}. Попробуйте позже.',
+    UZ: "❌ {lockerName} shkafchasini ochib bo'lmadi. Keyinroq urinib ko'ring.",
+    TJ: '❌ Кушодани қуттии {lockerName} имконнопазир шуд. Баъдтар кӯшиш кунед.',
+  },
+  swap_success: {
+    RU: '✅ Шкафчик открыт!\n📍 {lockerName}\n🏠 {lockerAddress}\n\nЗаберите батарею.',
+    UZ: "✅ Shkafcha ochildi!\n📍 {lockerName}\n🏠 {lockerAddress}\n\nBatareyani oling.",
+    TJ: '✅ Қуттӣ кушода шуд!\n📍 {lockerName}\n🏠 {lockerAddress}\n\nБатареяро гиред.',
+  },
+  swap_service_unavailable: {
+    RU: '⚠️ Сервис временно недоступен. Обратитесь к администратору.',
+    UZ: "⚠️ Xizmat vaqtincha mavjud emas. Administrator bilan bog'laning.",
+    TJ: '⚠️ Хидмат муваqqатан дастнорас аст. Бо мудир тамос гиред.',
+  },
+  swap_invalid_qr: {
+    RU: '⚠️ QR-код не распознан. Попробуйте ещё раз или введите код вручную:',
+    UZ: "⚠️ QR-kod tanilmadi. Qayta urinib ko'ring yoki kodni qo'lda kiriting:",
+    TJ: '⚠️ QR-рамз шинохта нашуд. Дубора кӯшиш кунед ё рамзро дастӣ ворид кунед:',
+  },
 };
 
 function getMsg(key: string, lang: string, vars: Record<string, unknown> = {}): string {
@@ -119,14 +151,19 @@ function getMsg(key: string, lang: string, vars: Record<string, unknown> = {}): 
 
 function mainMenuKb(lang: string, isRegistered = true) {
   const labels = (
-    lang === 'UZ' ? ["🗺 Shkafchalar xaritasi", '📷 QR skanerlash', '👤 Shaxsiy kabinet', "📝 Ro'yxatdan o'tish"] :
-    lang === 'TJ' ? ['🗺 Харитаи қуттиҳо', '📷 Сканерзии QR', '👤 Кабинети шахсӣ', '📝 Сабти ном'] :
-    ['🗺 Карта шкафчиков', '📷 Сканировать QR', '👤 Личный кабинет', '📝 Регистрация']
+    lang === 'UZ' ? ["🗺 Shkafchalar xaritasi", '📷 QR skanerlash', '👤 Shaxsiy kabinet', "📝 Ro'yxatdan o'tish", '🔄 Batareya almashtirish'] :
+    lang === 'TJ' ? ['🗺 Харитаи қуттиҳо', '📷 Сканерзии QR', '👤 Кабинети шахсӣ', '📝 Сабти ном', '🔄 Иваз кардани батарея'] :
+    ['🗺 Карта шкафчиков', '📷 Сканировать QR', '👤 Личный кабинет', '📝 Регистрация', '🔄 Обменять батарею']
   );
   const rows = isRegistered
-    ? [[btn(labels[0], 'menu:map')], [btn(labels[1], 'menu:scan_qr')], [btn(labels[2], 'menu:cabinet')]]
+    ? [[btn(labels[0], 'menu:map')], [btn(labels[1], 'menu:scan_qr')], [btn(labels[4], 'menu:swap')], [btn(labels[2], 'menu:cabinet')]]
     : [[btn(labels[3], 'register:start')], [btn(labels[0], 'menu:map')], [btn(labels[1], 'menu:scan_qr')], [btn(labels[2], 'menu:cabinet')]];
   return inlineKeyboard(rows);
+}
+
+function sharePhoneKb(lang: string) {
+  const label = lang === 'UZ' ? '📞 Telefon raqamimni ulashish' : lang === 'TJ' ? '📞 Рақами телефонамро мубодила кардан' : '📞 Поделиться номером';
+  return inlineKeyboard([[contactBtn(label)]]);
 }
 
 function langKb() { return inlineKeyboard([[btn('🇷🇺 Русский', 'lang:RU'), btn("🇺🇿 O'zbek", 'lang:UZ'), btn('🇹🇯 Тоҷикӣ', 'lang:TJ')]]); }
@@ -225,18 +262,22 @@ async function handleMessage(update: Record<string, unknown>) {
       .eq('id', user.id);
     if (nameErr) console.error('[webhook/message] ONBOARDING_NAME update error:', nameErr);
     else console.log('[webhook/message] name saved, bot_state → ONBOARDING_PHONE');
-    await sendMessage(maxId, getMsg('onboarding_ask_phone', lang), undefined, log);
+    await sendMessage(maxId, getMsg('onboarding_ask_phone', lang), sharePhoneKb(lang), log);
     return;
   }
 
   if (user.bot_state === 'ONBOARDING_PHONE') {
+    // Accept phone either from a "share contact" button or from typed text.
+    // Contact share: MAX messenger delivers the phone in body.contact.phone.
+    const contact = (body.contact ?? {}) as { phone?: string };
+    const rawPhone = (contact.phone ?? text).trim();
     // Normalize common formats like "+7 999 123-45-67" or "+7(999)1234567"
-    const normalized = text.trim().replace(/[\s\-().]/g, '');
+    const normalized = rawPhone.replace(/[\s\-().]/g, '');
     console.log('[webhook/message] handling ONBOARDING_PHONE, normalized:', normalized);
     const phoneRegex = /^\+\d{7,15}$/;
     if (!phoneRegex.test(normalized)) {
       console.log('[webhook/message] phone invalid, normalized:', normalized);
-      await sendMessage(maxId, getMsg('onboarding_phone_invalid', lang), undefined, log);
+      await sendMessage(maxId, getMsg('onboarding_phone_invalid', lang), sharePhoneKb(lang), log);
       return;
     }
     const { error: phoneErr } = await supabase.from('users').update({
@@ -247,6 +288,38 @@ async function handleMessage(update: Record<string, unknown>) {
     if (phoneErr) console.error('[webhook/message] ONBOARDING_PHONE update error:', phoneErr);
     else console.log('[webhook/message] phone saved, registration_status → PENDING_REGISTRATION');
     await sendMessage(maxId, getMsg('onboarding_done', lang), mainMenuKb(lang, false), log);
+    return;
+  }
+
+  if (user.bot_state === 'SWAP_QR') {
+    // User has sent the QR code text (manual or scanned) for the swap flow.
+    const qrCode = text.trim();
+    console.log('[webhook/message] handling SWAP_QR, qrCode:', qrCode);
+    if (!qrCode) {
+      await sendMessage(maxId, getMsg('swap_invalid_qr', lang), undefined, log);
+      return;
+    }
+    // Clear the bot_state first so we don't re-enter the flow on retry errors.
+    await supabase.from('users').update({ bot_state: null }).eq('id', user.id);
+
+    const svc = new LockerService(LOCKER_SERVICE_URL);
+    const result = await svc.performSwap(user.id, qrCode);
+    console.log('[webhook/message] performSwap result:', result);
+
+    if (result.outcome === 'service_unavailable') {
+      await sendMessage(maxId, getMsg('swap_service_unavailable', lang), undefined, log);
+    } else if (result.outcome === 'battery_not_found') {
+      await sendMessage(maxId, getMsg('swap_battery_not_found', lang), undefined, log);
+    } else if (result.outcome === 'locker_open_failed') {
+      await sendMessage(maxId, getMsg('swap_locker_open_failed', lang, { lockerName: result.lockerName }), undefined, log);
+    } else {
+      await sendMessage(
+        maxId,
+        getMsg('swap_success', lang, { lockerName: result.lockerName, lockerAddress: result.lockerAddress }),
+        undefined,
+        log,
+      );
+    }
     return;
   }
   if (text.toLowerCase() === '/start' || text.toLowerCase() === 'start') {
@@ -348,6 +421,20 @@ async function handleCallback(update: Record<string, unknown>) {
       const isRegistered = isCourierRegistered(user);
       if (action === 'main') await sendMessage(maxId, getMsg('main_menu', lang), mainMenuKb(lang, isRegistered), log);
       else if (action === 'scan_qr') await sendMessage(maxId, getMsg('scan_qr', lang), undefined, log);
+      else if (action === 'swap') {
+        if (!isRegistered) {
+          await sendMessage(maxId, getMsg('pending_registration', lang), mainMenuKb(lang, false), log);
+          return;
+        }
+        const { error: stateErr } = await supabase
+          .from('users')
+          .update({ bot_state: 'SWAP_QR' })
+          .eq('id', user.id);
+        if (stateErr) console.error('[webhook/callback] set SWAP_QR error:', stateErr);
+        else console.log('[webhook/callback] bot_state → SWAP_QR');
+        await answerCallback(callbackId, '🔄');
+        await sendMessage(maxId, getMsg('swap_ask_qr', lang), undefined, log);
+      }
       else if (action === 'map') {
         const { data: lockers } = await supabase.from('lockers').select('name, address').eq('is_active', true);
         const lines = (lockers ?? []).map((l) => `📍 ${l.name} — ${l.address}`).join('\n');
