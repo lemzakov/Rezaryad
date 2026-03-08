@@ -162,6 +162,7 @@ async function getOrCreateUser(maxId: string): Promise<DbUser> {
 async function handleBotStarted(update: Record<string, unknown>) {
   const userObj = (update.user || {}) as Record<string, unknown>;
   const maxId = String(userObj.user_id || '');
+  console.log('[webhook/bot_started] maxId:', maxId || '(empty)');
   if (!maxId) return;
 
   const user = await getOrCreateUser(maxId);
@@ -176,11 +177,30 @@ async function handleMessage(update: Record<string, unknown>) {
   const maxId = String(sender.user_id || '');
   const body = (msg.body || {}) as Record<string, unknown>;
   const text = String(body.text || '').trim();
-  if (!maxId) return;
+
+  console.log('[webhook/message] update_type=message_created', {
+    maxId: maxId || '(empty)',
+    textLength: text.length,
+    textPreview: text.slice(0, 50),
+    senderKeys: Object.keys(sender),
+    bodyKeys: Object.keys(body),
+  });
+
+  if (!maxId) {
+    console.warn('[webhook/message] maxId is empty – skipping. sender keys:', Object.keys(sender));
+    return;
+  }
 
   const user = await getOrCreateUser(maxId);
   const lang = user.language;
   const log: LogCtx = { userId: user.id, maxId };
+
+  console.log('[webhook/message] user resolved:', {
+    userId: user.id,
+    bot_state: user.bot_state,
+    registration_status: user.registration_status,
+    is_verified: user.is_verified,
+  });
 
   // Log incoming message for debug panel
   if (text) {
@@ -194,26 +214,38 @@ async function handleMessage(update: Record<string, unknown>) {
 
   // Handle onboarding conversation states
   if (user.bot_state === 'ONBOARDING_NAME') {
+    console.log('[webhook/message] handling ONBOARDING_NAME, text length:', text.trim().length);
     if (text.trim().length < 2) {
       await sendMessage(maxId, getMsg('onboarding_name_too_short', lang), undefined, log);
       return;
     }
-    await supabase.from('users').update({ name: text.trim(), bot_state: 'ONBOARDING_PHONE' }).eq('id', user.id);
+    const { error: nameErr } = await supabase
+      .from('users')
+      .update({ name: text.trim(), bot_state: 'ONBOARDING_PHONE' })
+      .eq('id', user.id);
+    if (nameErr) console.error('[webhook/message] ONBOARDING_NAME update error:', nameErr);
+    else console.log('[webhook/message] name saved, bot_state → ONBOARDING_PHONE');
     await sendMessage(maxId, getMsg('onboarding_ask_phone', lang), undefined, log);
     return;
   }
 
   if (user.bot_state === 'ONBOARDING_PHONE') {
+    // Normalize common formats like "+7 999 123-45-67" or "+7(999)1234567"
+    const normalized = text.trim().replace(/[\s\-().]/g, '');
+    console.log('[webhook/message] handling ONBOARDING_PHONE, normalized:', normalized);
     const phoneRegex = /^\+\d{7,15}$/;
-    if (!phoneRegex.test(text.trim())) {
+    if (!phoneRegex.test(normalized)) {
+      console.log('[webhook/message] phone invalid, normalized:', normalized);
       await sendMessage(maxId, getMsg('onboarding_phone_invalid', lang), undefined, log);
       return;
     }
-    await supabase.from('users').update({
-      phone: text.trim(),
+    const { error: phoneErr } = await supabase.from('users').update({
+      phone: normalized,
       bot_state: null,
       registration_status: 'PENDING_REGISTRATION',
     }).eq('id', user.id);
+    if (phoneErr) console.error('[webhook/message] ONBOARDING_PHONE update error:', phoneErr);
+    else console.log('[webhook/message] phone saved, registration_status → PENDING_REGISTRATION');
     await sendMessage(maxId, getMsg('onboarding_done', lang), mainMenuKb(lang, false), log);
     return;
   }
@@ -265,7 +297,12 @@ async function handleCallback(update: Record<string, unknown>) {
   const sender = (cb.user || {}) as Record<string, unknown>;
   const maxId = String(sender.user_id || '');
 
-  if (!maxId) return;
+  console.log('[webhook/callback] payload:', payload, 'maxId:', maxId || '(empty)');
+
+  if (!maxId) {
+    console.warn('[webhook/callback] maxId is empty – skipping');
+    return;
+  }
   const user = await getOrCreateUser(maxId);
   const lang = user.language;
   const log: LogCtx = { userId: user.id, maxId };
@@ -282,6 +319,11 @@ async function handleCallback(update: Record<string, unknown>) {
       }
     } else if (parts[0] === 'register') {
       if (parts[1] === 'start') {
+        console.log('[webhook/callback] register:start – user state:', {
+          is_verified: user.is_verified,
+          registration_status: user.registration_status,
+          bot_state: user.bot_state,
+        });
         if (user.is_verified) {
           await answerCallback(callbackId, getMsg('already_registered', lang));
           await sendMessage(maxId, getMsg('already_registered', lang), undefined, log);
@@ -292,7 +334,12 @@ async function handleCallback(update: Record<string, unknown>) {
           await sendMessage(maxId, getMsg('pending_registration', lang), mainMenuKb(lang, true), log);
           return;
         }
-        await supabase.from('users').update({ bot_state: 'ONBOARDING_NAME' }).eq('id', user.id);
+        const { error: stateErr } = await supabase
+          .from('users')
+          .update({ bot_state: 'ONBOARDING_NAME' })
+          .eq('id', user.id);
+        if (stateErr) console.error('[webhook/callback] set ONBOARDING_NAME error:', stateErr);
+        else console.log('[webhook/callback] bot_state → ONBOARDING_NAME');
         await answerCallback(callbackId, '📝');
         await sendMessage(maxId, getMsg('onboarding_ask_name', lang), undefined, log);
       }
@@ -449,9 +496,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const updateType = body.update_type || '';
+    console.log('[webhook] received update_type:', updateType);
     if (updateType === 'message_created') await handleMessage(body);
     else if (updateType === 'message_callback') await handleCallback(body);
     else if (updateType === 'bot_started') await handleBotStarted(body);
+    else console.log('[webhook] unhandled update_type:', updateType);
   } catch (e) {
     console.error('Webhook handler error:', e);
   }
